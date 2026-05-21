@@ -1,0 +1,154 @@
+name: Teardown
+run-name: ${{ format('Teardown ({0})', inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-1') }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      resource_prefix:
+        description: Environment/resource prefix used in names and state derivation
+        required: false
+        default: aws-dev-1
+        type: string
+      confirm_stack:
+        description: Type the exact effective stack name to confirm teardown, including resource prefix when used
+        required: true
+        default: aws-dev-1-order-satellite-service
+        type: string
+      log_retention_in_days:
+        description: CloudWatch log retention in days
+        required: false
+        default: "1"
+        type: string
+      instrumentation_mode:
+        description: ECS Java instrumentation mode
+        required: false
+        default: javaagent
+        type: choice
+        options:
+          - code
+          - javaagent
+      export_strategy:
+        description: Telemetry export path applied to traces and metrics
+        required: false
+        default: collector
+        type: choice
+        options:
+          - collector
+          - direct
+
+jobs:
+  teardown:
+    runs-on: ubuntu-latest
+    environment: aws-dev
+    permissions:
+      contents: read
+
+    env:
+      ENVIRONMENT_NAME: aws-dev
+      AWS_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
+      STACK_NAME: ${{ vars.STACK_NAME != '' && vars.STACK_NAME || 'order-satellite-service' }}
+      RESOURCE_PREFIX: ${{ inputs.resource_prefix != '' && inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-1' }}
+      LOG_RETENTION_IN_DAYS: ${{ inputs.log_retention_in_days != '' && inputs.log_retention_in_days || vars.LOG_RETENTION_IN_DAYS || '1' }}
+      INSTRUMENTATION_MODE: ${{ inputs.instrumentation_mode != '' && inputs.instrumentation_mode || vars.INSTRUMENTATION_MODE || 'javaagent' }}
+      EXPORT_STRATEGY: ${{ inputs.export_strategy != '' && inputs.export_strategy || vars.EXPORT_STRATEGY || 'collector' }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
+      IMAGE_URI_PLACEHOLDER: public.ecr.aws/docker/library/eclipse-temurin:21-jre
+      ORDER_API_BASE_URL: ${{ vars.ORDER_API_BASE_URL || 'https://z410yhtm4c.execute-api.us-east-1.amazonaws.com' }}
+
+    steps:
+      - name: Validate confirmation
+        run: |
+          set -euo pipefail
+          EFFECTIVE_STACK_NAME="$STACK_NAME"
+          if [ -n "$RESOURCE_PREFIX" ]; then
+            EFFECTIVE_STACK_NAME="${RESOURCE_PREFIX}-${STACK_NAME}"
+          fi
+
+          if [ "${{ inputs.confirm_stack }}" != "$EFFECTIVE_STACK_NAME" ]; then
+            echo "Confirmation mismatch. Expected '$EFFECTIVE_STACK_NAME'." >&2
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Validate AWS runner credentials
+        run: |
+          set -euo pipefail
+          : "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID must be present in the runner environment}"
+          : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY must be present in the runner environment}"
+          : "${AWS_SESSION_TOKEN:?AWS_SESSION_TOKEN must be present in the runner environment}"
+
+      - name: Resolve Terraform state backend
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          EFFECTIVE_STACK_NAME="$STACK_NAME"
+          if [ -n "$RESOURCE_PREFIX" ]; then
+            EFFECTIVE_STACK_NAME="${RESOURCE_PREFIX}-${STACK_NAME}"
+          fi
+
+          PROJECT_SLUG="$(printf '%s' "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          PROJECT_SLUG="${PROJECT_SLUG#-}"
+          PROJECT_SLUG="${PROJECT_SLUG%-}"
+
+          if [ -n "$TF_STATE_BUCKET" ]; then
+            BUCKET_NAME="$TF_STATE_BUCKET"
+          else
+            BUCKET_SUFFIX="${ACCOUNT_ID}-${AWS_REGION}-tfstate"
+            MAX_BUCKET_LENGTH=63
+            MAX_PROJECT_SLUG_LENGTH=$((MAX_BUCKET_LENGTH - ${#BUCKET_SUFFIX} - 1))
+            PROJECT_HASH="$(printf '%s' "$PROJECT_SLUG" | shasum -a 256 | cut -c1-8)"
+
+            if [ "$MAX_PROJECT_SLUG_LENGTH" -lt 10 ]; then
+              echo "Unable to derive a valid Terraform state bucket name from STACK_NAME/RESOURCE_PREFIX." >&2
+              exit 1
+            fi
+
+            if [ "${#PROJECT_SLUG}" -gt "$MAX_PROJECT_SLUG_LENGTH" ]; then
+              TRUNCATED_LENGTH=$((MAX_PROJECT_SLUG_LENGTH - 9))
+              PROJECT_SLUG="${PROJECT_SLUG:0:$TRUNCATED_LENGTH}-${PROJECT_HASH}"
+              PROJECT_SLUG="${PROJECT_SLUG%-}"
+            fi
+
+            BUCKET_NAME="${PROJECT_SLUG}-${BUCKET_SUFFIX}"
+          fi
+
+          STATE_KEY="${TF_STATE_KEY:-${ENVIRONMENT_NAME}/${EFFECTIVE_STACK_NAME}.tfstate}"
+
+          if ! aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+            echo "Terraform state bucket '$BUCKET_NAME' does not exist or is not accessible." >&2
+            exit 1
+          fi
+
+          {
+            echo "TF_STATE_BUCKET=$BUCKET_NAME"
+            echo "TF_STATE_KEY=$STATE_KEY"
+          } >> "$GITHUB_ENV"
+
+      - name: Initialize Terraform
+        run: |
+          terraform -chdir=infra/terraform init -reconfigure \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}"
+
+      - name: Destroy ECS/Fargate stack
+        run: |
+          terraform -chdir=infra/terraform destroy \
+            -auto-approve \
+            -var="aws_region=${AWS_REGION}" \
+            -var="stack_name=${STACK_NAME}" \
+            -var="resource_prefix=${RESOURCE_PREFIX}" \
+            -var="image_uri=${IMAGE_URI_PLACEHOLDER}" \
+            -var="order_api_base_url=${ORDER_API_BASE_URL}" \
+            -var="log_retention_in_days=${LOG_RETENTION_IN_DAYS}" \
+            -var="instrumentation_mode=${INSTRUMENTATION_MODE}" \
+            -var="export_strategy=${EXPORT_STRATEGY}"

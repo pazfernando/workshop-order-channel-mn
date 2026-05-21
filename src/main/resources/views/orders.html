@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="es" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title th:text="${title}">Order Satellite Demo</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<main class="shell">
+    <section class="header">
+        <div>
+            <p class="eyebrow">Micronaut satellite app</p>
+            <h1>Order Satellite Demo</h1>
+        </div>
+        <span class="target">AWS API Gateway + Lambda</span>
+    </section>
+
+    <section class="grid">
+        <form class="panel" id="create-order-form">
+            <h2>Crear orden</h2>
+            <label for="productoId">Producto ID</label>
+            <input id="productoId" name="productoId" type="text" placeholder="SKU-001" required>
+
+            <label for="cantidad">Cantidad</label>
+            <input id="cantidad" name="cantidad" type="number" min="1" value="1" required>
+
+            <button type="submit">Crear Orden</button>
+        </form>
+
+        <form class="panel" id="search-order-form">
+            <h2>Buscar orden</h2>
+            <label for="orderId">Order ID</label>
+            <input id="orderId" name="orderId" type="text" placeholder="order-123" required>
+
+            <button type="submit">Buscar</button>
+        </form>
+    </section>
+
+    <section class="panel result-panel">
+        <div class="result-heading">
+            <h2>Resultado</h2>
+            <button class="secondary" id="clear-result" type="button">Limpiar</button>
+        </div>
+        <pre id="result-output">{}</pre>
+    </section>
+</main>
+
+<script>
+    const output = document.querySelector("#result-output");
+
+    function renderResult(payload) {
+        output.textContent = JSON.stringify(payload, null, 2);
+    }
+
+    async function callApi(url, options) {
+        const response = await fetch(url, {
+            headers: {"Content-Type": "application/json"},
+            ...options
+        });
+
+        const text = await response.text();
+        let body = {};
+        try {
+            body = text ? JSON.parse(text) : {};
+        } catch (error) {
+            body = {raw: text};
+        }
+
+        if (!response.ok) {
+            renderResult({ok: false, status: response.status, body});
+            return;
+        }
+
+        renderResult(body);
+    }
+
+    document.querySelector("#create-order-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        await callApi("/api/orders", {
+            method: "POST",
+            body: JSON.stringify({
+                productoId: form.get("productoId"),
+                cantidad: Number(form.get("cantidad"))
+            })
+        });
+    });
+
+    document.querySelector("#search-order-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = new FormData(event.currentTarget);
+        const orderId = encodeURIComponent(form.get("orderId"));
+        await callApi(`/api/orders/${orderId}`, {method: "GET"});
+    });
+
+    document.querySelector("#clear-result").addEventListener("click", () => {
+        renderResult({});
+    });
+</script>
+</body>
+</html>

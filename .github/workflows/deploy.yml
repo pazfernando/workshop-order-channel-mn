@@ -1,0 +1,333 @@
+name: Deploy
+run-name: ${{ format('Deploy ({0})', github.event_name == 'workflow_dispatch' && (inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-1') || (vars.RESOURCE_PREFIX || 'aws-dev-1')) }}
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      resource_prefix:
+        description: Environment/resource prefix used in names and state derivation
+        required: false
+        default: aws-dev-1
+        type: string
+      log_retention_in_days:
+        description: CloudWatch log retention in days
+        required: false
+        default: "1"
+        type: string
+      instrumentation_mode:
+        description: ECS Java instrumentation mode
+        required: false
+        default: javaagent
+        type: choice
+        options:
+          - code
+          - javaagent
+      export_strategy:
+        description: Telemetry export path applied to traces and metrics in the effective contract
+        required: false
+        default: collector
+        type: choice
+        options:
+          - collector
+          - direct
+      collector_endpoint:
+        description: Optional collector OTLP base endpoint
+        required: false
+        default: ""
+        type: string
+      collector_traces_endpoint:
+        description: Optional collector traces endpoint override
+        required: false
+        default: ""
+        type: string
+      collector_metrics_endpoint:
+        description: Optional collector metrics endpoint override
+        required: false
+        default: ""
+        type: string
+      direct_endpoint:
+        description: Optional direct OTLP base endpoint
+        required: false
+        default: ""
+        type: string
+      direct_traces_endpoint:
+        description: Optional direct traces endpoint override
+        required: false
+        default: ""
+        type: string
+      direct_metrics_endpoint:
+        description: Optional direct metrics endpoint override
+        required: false
+        default: ""
+        type: string
+jobs:
+  observability:
+    runs-on: ubuntu-latest
+    environment: aws-dev
+    permissions:
+      contents: read
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
+    outputs:
+      validation_message: ${{ steps.contract-consumer.outputs.validation_message }}
+      plan_json: ${{ steps.contract-consumer.outputs.plan_json }}
+      managed_suite_enabled: ${{ steps.contract-consumer.outputs.managed_suite_enabled }}
+      managed_suite_grafana_url: ${{ steps.contract-consumer.outputs.managed_suite_grafana_url }}
+      managed_suite_otlp_http_endpoint: ${{ steps.contract-consumer.outputs.managed_suite_otlp_http_endpoint }}
+      workload_dashboard_backend: ${{ steps.contract-consumer.outputs.workload_dashboard_backend }}
+      workload_dashboard_uid: ${{ steps.contract-consumer.outputs.workload_dashboard_uid }}
+      workload_dashboard_url: ${{ steps.contract-consumer.outputs.workload_dashboard_url }}
+      effective_collector_endpoint: ${{ steps.contract-consumer.outputs.effective_collector_endpoint }}
+      effective_collector_source: ${{ steps.contract-consumer.outputs.effective_collector_source }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare effective observability contract
+        env:
+          SOURCE_CONTRACT_PATH: contracts/observability/observability-contract.yaml
+          EFFECTIVE_CONTRACT_PATH: build/observability/observability-contract.effective.yaml
+          EXPORT_STRATEGY_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.export_strategy || 'collector' }}
+        run: |
+          set -euo pipefail
+          mkdir -p build/observability
+          cp "$SOURCE_CONTRACT_PATH" "$EFFECTIVE_CONTRACT_PATH"
+
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          contract_path = Path(os.environ["EFFECTIVE_CONTRACT_PATH"])
+          export_strategy = os.environ["EXPORT_STRATEGY_INPUT"].strip()
+          if export_strategy not in {"collector", "direct"}:
+            raise SystemExit(f"Unsupported export strategy: {export_strategy}")
+
+          text = contract_path.read_text()
+          text = text.replace("        ingestion: collector", f"        ingestion: {export_strategy}")
+          text = text.replace("        ingestion: direct", f"        ingestion: {export_strategy}")
+          contract_path.write_text(text)
+          PY
+
+      - name: Validate workflow input combination
+        env:
+          EXPORT_STRATEGY_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.export_strategy || 'collector' }}
+          COLLECTOR_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_endpoint || '' }}
+          COLLECTOR_TRACES_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_traces_endpoint || '' }}
+          COLLECTOR_METRICS_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_metrics_endpoint || '' }}
+          DIRECT_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_endpoint || '' }}
+          DIRECT_TRACES_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_traces_endpoint || '' }}
+          DIRECT_METRICS_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_metrics_endpoint || '' }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EXPORT_STRATEGY_INPUT" = "direct" ] && { [ -n "$COLLECTOR_ENDPOINT_INPUT" ] || [ -n "$COLLECTOR_TRACES_ENDPOINT_INPUT" ] || [ -n "$COLLECTOR_METRICS_ENDPOINT_INPUT" ]; }; then
+            echo "collector_* inputs cannot be combined with export_strategy=direct." >&2
+            exit 1
+          fi
+
+          if [ "$EXPORT_STRATEGY_INPUT" = "collector" ] && { [ -n "$DIRECT_ENDPOINT_INPUT" ] || [ -n "$DIRECT_TRACES_ENDPOINT_INPUT" ] || [ -n "$DIRECT_METRICS_ENDPOINT_INPUT" ]; }; then
+            echo "direct_* inputs cannot be combined with export_strategy=collector." >&2
+            exit 1
+          fi
+
+      - name: Validate AWS runner credentials
+        run: |
+          set -euo pipefail
+          : "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID must be present in the runner environment}"
+          : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY must be present in the runner environment}"
+          : "${AWS_SESSION_TOKEN:?AWS_SESSION_TOKEN must be present in the runner environment}"
+
+      - name: Run contract consumer
+        id: contract-consumer
+        uses: pazfernando/workshop-idp-o11y/.github/actions/contract-consumer@main
+        with:
+          contract_path: build/observability/observability-contract.effective.yaml
+          upload_artifacts: true
+          generate_bindings: false
+          instrumentation_mode: code
+          collector_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_endpoint || '' }}
+          collector_traces_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_traces_endpoint || '' }}
+          collector_metrics_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_metrics_endpoint || '' }}
+          direct_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_endpoint || '' }}
+          direct_traces_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_traces_endpoint || '' }}
+          direct_metrics_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_metrics_endpoint || '' }}
+          deploy_managed_suite: false
+          reuse_managed_suite: true
+          aws_region: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
+        env:
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
+
+  deploy:
+    needs:
+      - observability
+    runs-on: ubuntu-latest
+    environment: aws-dev
+    permissions:
+      contents: read
+
+    env:
+      ENVIRONMENT_NAME: aws-dev
+      AWS_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
+      AWS_DEFAULT_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
+      STACK_NAME: ${{ vars.STACK_NAME != '' && vars.STACK_NAME || 'order-satellite-service' }}
+      RESOURCE_PREFIX: ${{ github.event_name == 'workflow_dispatch' && (inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-1') || (vars.RESOURCE_PREFIX || 'aws-dev-1') }}
+      LOG_RETENTION_IN_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.log_retention_in_days || vars.LOG_RETENTION_IN_DAYS || '1' }}
+      INSTRUMENTATION_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.instrumentation_mode || vars.INSTRUMENTATION_MODE || 'javaagent' }}
+      EXPORT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.export_strategy || vars.EXPORT_STRATEGY || 'collector' }}
+      COLLECTOR_TRACES_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_traces_endpoint || '' }}
+      COLLECTOR_METRICS_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_metrics_endpoint || '' }}
+      DIRECT_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_endpoint || '' }}
+      DIRECT_TRACES_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_traces_endpoint || '' }}
+      DIRECT_METRICS_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_metrics_endpoint || '' }}
+      ORDER_API_BASE_URL: ${{ vars.ORDER_API_BASE_URL || 'https://z410yhtm4c.execute-api.us-east-1.amazonaws.com' }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
+      IMAGE_URI_PLACEHOLDER: public.ecr.aws/docker/library/eclipse-temurin:21-jre
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Validate AWS runner credentials
+        run: |
+          set -euo pipefail
+          : "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID must be present in the runner environment}"
+          : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY must be present in the runner environment}"
+          : "${AWS_SESSION_TOKEN:?AWS_SESSION_TOKEN must be present in the runner environment}"
+
+      - name: Resolve Terraform state backend
+        run: |
+          set -euo pipefail
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          EFFECTIVE_STACK_NAME="$STACK_NAME"
+          if [ -n "$RESOURCE_PREFIX" ]; then
+            EFFECTIVE_STACK_NAME="${RESOURCE_PREFIX}-${STACK_NAME}"
+          fi
+
+          PROJECT_SLUG="$(printf '%s' "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          PROJECT_SLUG="${PROJECT_SLUG#-}"
+          PROJECT_SLUG="${PROJECT_SLUG%-}"
+
+          if [ -n "$TF_STATE_BUCKET" ]; then
+            BUCKET_NAME="$TF_STATE_BUCKET"
+          else
+            BUCKET_SUFFIX="${ACCOUNT_ID}-${AWS_REGION}-tfstate"
+            MAX_BUCKET_LENGTH=63
+            MAX_PROJECT_SLUG_LENGTH=$((MAX_BUCKET_LENGTH - ${#BUCKET_SUFFIX} - 1))
+            PROJECT_HASH="$(printf '%s' "$PROJECT_SLUG" | shasum -a 256 | cut -c1-8)"
+
+            if [ "$MAX_PROJECT_SLUG_LENGTH" -lt 10 ]; then
+              echo "Unable to derive a valid Terraform state bucket name from STACK_NAME/RESOURCE_PREFIX." >&2
+              exit 1
+            fi
+
+            if [ "${#PROJECT_SLUG}" -gt "$MAX_PROJECT_SLUG_LENGTH" ]; then
+              TRUNCATED_LENGTH=$((MAX_PROJECT_SLUG_LENGTH - 9))
+              PROJECT_SLUG="${PROJECT_SLUG:0:$TRUNCATED_LENGTH}-${PROJECT_HASH}"
+              PROJECT_SLUG="${PROJECT_SLUG%-}"
+            fi
+
+            BUCKET_NAME="${PROJECT_SLUG}-${BUCKET_SUFFIX}"
+          fi
+
+          STATE_KEY="${TF_STATE_KEY:-${ENVIRONMENT_NAME}/${EFFECTIVE_STACK_NAME}.tfstate}"
+
+          if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+            echo "Using existing Terraform state bucket: $BUCKET_NAME"
+          else
+            if [ "$AWS_REGION" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "$BUCKET_NAME"
+            else
+              aws s3api create-bucket \
+                --bucket "$BUCKET_NAME" \
+                --create-bucket-configuration "LocationConstraint=${AWS_REGION}"
+            fi
+
+            aws s3api put-bucket-versioning \
+              --bucket "$BUCKET_NAME" \
+              --versioning-configuration Status=Enabled
+
+            aws s3api put-bucket-encryption \
+              --bucket "$BUCKET_NAME" \
+              --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+          fi
+
+          {
+            echo "TF_STATE_BUCKET=$BUCKET_NAME"
+            echo "TF_STATE_KEY=$STATE_KEY"
+          } >> "$GITHUB_ENV"
+
+      - name: Initialize Terraform
+        run: |
+          terraform -chdir=infra/terraform init -reconfigure \
+            -backend-config="bucket=${TF_STATE_BUCKET}" \
+            -backend-config="key=${TF_STATE_KEY}" \
+            -backend-config="region=${AWS_REGION}"
+
+      - name: Ensure ECR repository
+        run: |
+          terraform -chdir=infra/terraform apply \
+            -target=aws_ecr_repository.app \
+            -auto-approve \
+            -var="aws_region=${AWS_REGION}" \
+            -var="stack_name=${STACK_NAME}" \
+            -var="resource_prefix=${RESOURCE_PREFIX}" \
+            -var="image_uri=${IMAGE_URI_PLACEHOLDER}"
+
+          echo "ECR_REPOSITORY_URL=$(terraform -chdir=infra/terraform output -raw ecr_repository_url)" >> "$GITHUB_ENV"
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push container image
+        run: |
+          set -euo pipefail
+          IMAGE_URI="${ECR_REPOSITORY_URL}:${GITHUB_SHA}"
+          docker build --pull -t "$IMAGE_URI" .
+          docker push "$IMAGE_URI"
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+
+      - name: Deploy ECS/Fargate stack
+        env:
+          EFFECTIVE_COLLECTOR_ENDPOINT: ${{ needs.observability.outputs.effective_collector_endpoint }}
+        run: |
+          terraform -chdir=infra/terraform apply \
+            -auto-approve \
+            -var="aws_region=${AWS_REGION}" \
+            -var="stack_name=${STACK_NAME}" \
+            -var="resource_prefix=${RESOURCE_PREFIX}" \
+            -var="image_uri=${IMAGE_URI}" \
+            -var="order_api_base_url=${ORDER_API_BASE_URL}" \
+            -var="log_retention_in_days=${LOG_RETENTION_IN_DAYS}" \
+            -var="instrumentation_mode=${INSTRUMENTATION_MODE}" \
+            -var="export_strategy=${EXPORT_STRATEGY}" \
+            -var="collector_endpoint=${EFFECTIVE_COLLECTOR_ENDPOINT}" \
+            -var="collector_traces_endpoint=${COLLECTOR_TRACES_ENDPOINT}" \
+            -var="collector_metrics_endpoint=${COLLECTOR_METRICS_ENDPOINT}" \
+            -var="direct_endpoint=${DIRECT_ENDPOINT}" \
+            -var="direct_traces_endpoint=${DIRECT_TRACES_ENDPOINT}" \
+            -var="direct_metrics_endpoint=${DIRECT_METRICS_ENDPOINT}"
+
+      - name: Publish deployment summary
+        run: |
+          {
+            echo "## Deployment"
+            echo ""
+            echo "- App URL: $(terraform -chdir=infra/terraform output -raw app_url)"
+            echo "- ECS cluster: $(terraform -chdir=infra/terraform output -raw ecs_cluster_name)"
+            echo "- ECS service: $(terraform -chdir=infra/terraform output -raw ecs_service_name)"
+            echo "- CloudWatch log group: $(terraform -chdir=infra/terraform output -raw log_group_name)"
+            echo "- Observability collector source: ${{ needs.observability.outputs.effective_collector_source }}"
+            echo "- Workload dashboard: ${{ needs.observability.outputs.workload_dashboard_url }}"
+          } >> "$GITHUB_STEP_SUMMARY"

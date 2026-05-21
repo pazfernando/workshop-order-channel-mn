@@ -1,0 +1,13 @@
+metrics:
+  - name: orders.created.total
+    type: counter
+    unit: "1"
+    description: Total de ordenes creadas
+    dimensions: ["status", "productId"]
+  - name: orders.processing.duration
+    type: histogram
+    unit: "ms"
+    description: Duracion del procesamiento de ordenes
+    dimensions: ["operation"]
+logs:
+  format: json

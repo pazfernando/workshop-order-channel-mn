@@ -1,0 +1,11 @@
+<configuration>
+    <appender name="json" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+            <customFields>{"service.name":"order-satellite-service","deployment.environment":"dev"}</customFields>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="json"/>
+    </root>
+</configuration>

@@ -1,0 +1,35 @@
+micronaut:
+  application:
+    name: order-satellite-service
+  metrics:
+    enabled: true
+  server:
+    port: 8080
+  router:
+    static-resources:
+      default:
+        enabled: true
+        mapping: /**
+        paths: classpath:static
+
+order:
+  api:
+    base-url: ${ORDER_API_BASE_URL:`https://z410yhtm4c.execute-api.us-east-1.amazonaws.com/`}
+
+jackson:
+  serialization:
+    indentOutput: true
+
+endpoints:
+  all:
+    enabled: false
+  health:
+    enabled: true
+    sensitive: false
+  metrics:
+    enabled: true
+    sensitive: false
+
+logger:
+  levels:
+    com.example.ordersatellite: INFO

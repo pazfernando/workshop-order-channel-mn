@@ -1,0 +1,9 @@
+.gradle/
+.terraform/
+build/
+out/
+.idea/
+*.iml
+*.tfstate
+*.tfstate.*
+.DS_Store

@@ -1,0 +1,47 @@
+plugins {
+    id("io.micronaut.application") version "4.5.5"
+}
+
+version = "1.0.0"
+group = "com.example"
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    annotationProcessor("io.micronaut.serde:micronaut-serde-processor")
+    annotationProcessor("io.micronaut.validation:micronaut-validation-processor")
+
+    implementation("io.micronaut:micronaut-http-client")
+    implementation("io.micronaut:micronaut-management")
+    implementation("io.micronaut.micrometer:micronaut-micrometer-core")
+    implementation("io.micronaut.serde:micronaut-serde-jackson")
+    implementation("io.micronaut.validation:micronaut-validation")
+    implementation("io.micronaut.views:micronaut-views-thymeleaf")
+    implementation("jakarta.validation:jakarta.validation-api")
+
+    runtimeOnly("ch.qos.logback:logback-classic")
+    runtimeOnly("net.logstash.logback:logstash-logback-encoder:7.4")
+    runtimeOnly("org.yaml:snakeyaml")
+
+    testImplementation("io.micronaut:micronaut-http-client")
+}
+
+application {
+    mainClass = "com.example.ordersatellite.Application"
+}
+
+java {
+    sourceCompatibility = JavaVersion.toVersion("21")
+    targetCompatibility = JavaVersion.toVersion("21")
+}
+
+micronaut {
+    runtime("netty")
+    testRuntime("junit5")
+    processing {
+        incremental(true)
+        annotations("com.example.ordersatellite.*")
+    }
+}

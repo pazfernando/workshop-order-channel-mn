@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+      - develop
+
+jobs:
+  validate-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Build and test
+        run: gradle --no-daemon clean test shadowJar
+
+      - name: Build container image
+        run: docker build --pull -t order-satellite-service:ci .
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_wrapper: false
+
+      - name: Check Terraform formatting
+        run: terraform -chdir=infra/terraform fmt -check -recursive
+
+      - name: Initialize Terraform
+        run: terraform -chdir=infra/terraform init -backend=false
+
+      - name: Validate Terraform configuration
+        run: terraform -chdir=infra/terraform validate
