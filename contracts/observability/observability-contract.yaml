@@ -1,4 +1,4 @@
-apiVersion: observability.platform/v1
+apiVersion: observability.platform/v1alpha1
 kind: ObservabilityContract
 metadata:
   name: order-satellite-demo
