@@ -1,13 +1,33 @@
 metrics:
-  - name: orders.created.total
+  - name: InboundRequestCount
     type: counter
-    unit: "1"
-    description: Total de ordenes creadas
-    dimensions: ["status", "productId"]
-  - name: orders.processing.duration
+    unit: "{request}"
+    description: Total inbound HTTP requests handled by the service.
+    dimensions: ["http.route", "http.request.method", "http.response.status_code"]
+  - name: InboundRequestDuration
     type: histogram
     unit: "ms"
-    description: Duracion del procesamiento de ordenes
-    dimensions: ["operation"]
+    description: End-to-end inbound HTTP request latency.
+    dimensions: ["http.route", "http.request.method", "http.response.status_code"]
+  - name: InboundRequestErrors
+    type: counter
+    unit: "{error}"
+    description: Inbound HTTP requests that completed with server-side failure conditions.
+    dimensions: ["http.route", "http.request.method", "http.response.status_code"]
+  - name: OutboundDependencyCallCount
+    type: counter
+    unit: "{call}"
+    description: Total outbound calls from the service to the order API dependency.
+    dimensions: ["dependency.name", "dependency.operation", "result"]
+  - name: OutboundDependencyCallDuration
+    type: histogram
+    unit: "ms"
+    description: Outbound dependency call latency for the order API.
+    dimensions: ["dependency.name", "dependency.operation"]
+  - name: OutboundDependencyCallErrors
+    type: counter
+    unit: "{error}"
+    description: Outbound dependency calls that ended in failure.
+    dimensions: ["dependency.name", "dependency.operation"]
 logs:
   format: json

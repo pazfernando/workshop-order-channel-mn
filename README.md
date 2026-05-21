@@ -8,7 +8,7 @@ Aplicacion demo Micronaut que expone una interfaz HTML sin autenticacion para cr
 - API local en `/api/orders` que delega al cliente HTTP declarativo.
 - Cliente Micronaut `@Client` apuntando a `https://z410yhtm4c.execute-api.us-east-1.amazonaws.com`.
 - Contrato IDP de observabilidad en `contracts/observability/observability-contract.yaml`.
-- Catalogo complementario de metricas/logs en `contracts/observability/order-satellite-metrics-catalog.yaml`.
+- Catalogo complementario de metricas/logs en `contracts/observability/order-satellite-metrics-catalog.yaml`, alineado con el preset `distributed-service`.
 - Metricas Micrometer locales:
   - `orders.created.total`
   - `orders.processing.duration`
@@ -83,4 +83,4 @@ infra/terraform
 .github/workflows
 ```
 
-Nota: el schema adjunto valida `metrics` y `logs` contra `signalSpec` con `additionalProperties: false`. Por eso el catalogo de metricas y el formato de logs se mantienen en un archivo complementario en vez de agregarse dentro del contrato principal.
+Nota: el contrato declara `spec.telemetry.signals.metrics.catalog` con metricas soportadas por el preset `distributed-service`. El archivo complementario conserva el mismo catalogo para lectura rapida.
