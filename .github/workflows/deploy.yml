@@ -283,6 +283,29 @@ jobs:
 
       - name: Ensure ECR repository
         run: |
+          set -euo pipefail
+
+          EFFECTIVE_STACK_NAME="$STACK_NAME"
+          if [ -n "$RESOURCE_PREFIX" ]; then
+            EFFECTIVE_STACK_NAME="${RESOURCE_PREFIX}-${STACK_NAME}"
+          fi
+
+          ECR_REPOSITORY_NAME="$(printf '%s' "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME#-}"
+          ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME%-}/app"
+
+          if aws ecr describe-repositories --repository-names "$ECR_REPOSITORY_NAME" >/dev/null 2>&1; then
+            if ! terraform -chdir=infra/terraform state show aws_ecr_repository.app >/dev/null 2>&1; then
+              terraform -chdir=infra/terraform import \
+                -var="aws_region=${AWS_REGION}" \
+                -var="stack_name=${STACK_NAME}" \
+                -var="resource_prefix=${RESOURCE_PREFIX}" \
+                -var="image_uri=${IMAGE_URI_PLACEHOLDER}" \
+                aws_ecr_repository.app \
+                "$ECR_REPOSITORY_NAME"
+            fi
+          fi
+
           terraform -chdir=infra/terraform apply \
             -target=aws_ecr_repository.app \
             -auto-approve \
