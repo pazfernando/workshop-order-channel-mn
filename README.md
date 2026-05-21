@@ -52,7 +52,7 @@ Inputs principales de `Deploy`:
 - `collector_endpoint`, `collector_traces_endpoint`, `collector_metrics_endpoint`: overrides OTLP opcionales para collector mode.
 - `direct_endpoint`, `direct_traces_endpoint`, `direct_metrics_endpoint`: endpoints OTLP opcionales para direct mode en ECS/Fargate.
 
-Variables de entorno requeridas en los runners de GitHub Actions:
+Secrets requeridos en GitHub Actions, configurados en el environment `aws-dev` o a nivel de repositorio:
 
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
