@@ -2,15 +2,8 @@ provider "aws" {
   region = var.aws_region
 }
 
-data "aws_vpc" "default" {
-  default = true
-}
-
-data "aws_subnets" "default" {
-  filter {
-    name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
-  }
+data "aws_availability_zones" "available" {
+  state = "available"
 }
 
 locals {
@@ -22,6 +15,8 @@ locals {
   service_namespace      = "observability-demo"
   deployment_environment = "dev"
   log_group_name         = "/ecs/${local.name_slug}"
+  public_azs             = slice(data.aws_availability_zones.available.names, 0, 2)
+  public_subnet_cidrs    = ["10.42.0.0/24", "10.42.1.0/24"]
 
   otlp_base_endpoint = var.export_strategy == "collector" ? trimspace(var.collector_endpoint) : trimspace(var.direct_endpoint)
   otlp_traces_endpoint = var.export_strategy == "collector" ? (
@@ -126,6 +121,57 @@ locals {
   }
 }
 
+resource "aws_vpc" "app" {
+  cidr_block           = "10.42.0.0/16"
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+
+  tags = merge(local.common_tags, {
+    Name = local.name_slug
+  })
+}
+
+resource "aws_internet_gateway" "app" {
+  vpc_id = aws_vpc.app.id
+
+  tags = merge(local.common_tags, {
+    Name = local.name_slug
+  })
+}
+
+resource "aws_subnet" "public" {
+  count = length(local.public_azs)
+
+  vpc_id                  = aws_vpc.app.id
+  cidr_block              = local.public_subnet_cidrs[count.index]
+  availability_zone       = local.public_azs[count.index]
+  map_public_ip_on_launch = true
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_slug}-public-${count.index + 1}"
+  })
+}
+
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.app.id
+
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.app.id
+  }
+
+  tags = merge(local.common_tags, {
+    Name = "${local.name_slug}-public"
+  })
+}
+
+resource "aws_route_table_association" "public" {
+  count = length(aws_subnet.public)
+
+  subnet_id      = aws_subnet.public[count.index].id
+  route_table_id = aws_route_table.public.id
+}
+
 resource "aws_ecr_repository" "app" {
   name         = "${local.name_slug}/app"
   force_delete = true
@@ -201,7 +247,7 @@ resource "aws_iam_role" "task" {
 resource "aws_security_group" "load_balancer" {
   name        = "${local.short_name}-alb"
   description = "Allow HTTP access to the order satellite load balancer"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = aws_vpc.app.id
 
   ingress {
     from_port   = 80
@@ -223,7 +269,7 @@ resource "aws_security_group" "load_balancer" {
 resource "aws_security_group" "service" {
   name        = "${local.short_name}-svc"
   description = "Allow load balancer traffic to the order satellite service"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = aws_vpc.app.id
 
   ingress {
     from_port       = var.container_port
@@ -246,7 +292,7 @@ resource "aws_lb" "app" {
   name               = local.short_name
   load_balancer_type = "application"
   security_groups    = [aws_security_group.load_balancer.id]
-  subnets            = data.aws_subnets.default.ids
+  subnets            = aws_subnet.public[*].id
 
   tags = local.common_tags
 }
@@ -256,7 +302,7 @@ resource "aws_lb_target_group" "app" {
   port        = var.container_port
   protocol    = "HTTP"
   target_type = "ip"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = aws_vpc.app.id
 
   health_check {
     enabled             = true
@@ -352,7 +398,7 @@ resource "aws_ecs_service" "app" {
   network_configuration {
     assign_public_ip = true
     security_groups  = [aws_security_group.service.id]
-    subnets          = data.aws_subnets.default.ids
+    subnets          = aws_subnet.public[*].id
   }
 
   depends_on = [
