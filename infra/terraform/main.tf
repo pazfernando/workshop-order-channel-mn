@@ -255,10 +255,11 @@ resource "aws_security_group" "service" {
 }
 
 resource "aws_lb" "app" {
-  name               = local.infra_name
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.load_balancer.id]
-  subnets            = data.aws_subnets.public.ids
+  name                       = local.infra_name
+  load_balancer_type         = "application"
+  security_groups            = [aws_security_group.load_balancer.id]
+  subnets                    = data.aws_subnets.public.ids
+  enable_deletion_protection = false
 
   tags = local.common_tags
 }
@@ -369,7 +370,8 @@ resource "aws_ecs_service" "app" {
 
   depends_on = [
     aws_iam_role_policy_attachment.task_execution,
-    aws_lb_listener.http
+    aws_lb_listener.http,
+    aws_lb_target_group.app
   ]
 
   tags = local.common_tags
