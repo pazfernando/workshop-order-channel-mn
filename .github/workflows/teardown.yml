@@ -9,6 +9,11 @@ on:
         required: false
         default: aws-dev-mn
         type: string
+      vpc_id:
+        description: VPC ID where the service was deployed (used as fallback if state is missing)
+        required: false
+        default: vpc-095bf825560175dae
+        type: string
       confirm_stack:
         description: Type the exact effective stack name to confirm teardown, including resource prefix when used
         required: true
@@ -118,42 +123,115 @@ jobs:
       - name: Read variables from Terraform state
         run: |
           set -euo pipefail
-          STATE_JSON="$(terraform -chdir=infra/terraform show -json 2>/dev/null || true)"
+          cd infra/terraform
 
+          # Intentar leer del estado primero
           IMAGE_URI=""
           VPC_ID=""
 
-          if [ -n "$STATE_JSON" ] && echo "$STATE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('values') else 1)" 2>/dev/null; then
-            printf '%s\n' \
-              'import sys, json' \
-              'd = json.load(sys.stdin)' \
-              'for r in d.get("values", {}).get("root_module", {}).get("resources", []):' \
-              '    if r.get("type") == "aws_ecs_task_definition" and r.get("name") == "app":' \
-              '        defs = json.loads(r["values"].get("container_definitions", "[]"))' \
-              '        if defs: print(defs[0].get("image", ""))' \
-              '        break' \
-              > /tmp/tf_image_uri.py
+          if terraform state list >/dev/null 2>&1; then
+            STATE_JSON="$(terraform show -json 2>/dev/null || true)"
+            if [ -n "$STATE_JSON" ]; then
+              printf '%s\n' \
+                'import sys, json' \
+                'd = json.load(sys.stdin)' \
+                'for r in d.get("values", {}).get("root_module", {}).get("resources", []):' \
+                '    if r.get("type") == "aws_ecs_task_definition" and r.get("name") == "app":' \
+                '        defs = json.loads(r["values"].get("container_definitions", "[]"))' \
+                '        if defs: print(defs[0].get("image", ""))' \
+                '        break' \
+                > /tmp/tf_image_uri.py
 
-            printf '%s\n' \
-              'import sys, json' \
-              'd = json.load(sys.stdin)' \
-              'for r in d.get("values", {}).get("root_module", {}).get("resources", []):' \
-              '    if r.get("type") == "aws_security_group" and r.get("name") == "service":' \
-              '        print(r["values"].get("vpc_id", ""))' \
-              '        break' \
-              > /tmp/tf_vpc_id.py
+              printf '%s\n' \
+                'import sys, json' \
+                'd = json.load(sys.stdin)' \
+                'for r in d.get("values", {}).get("root_module", {}).get("resources", []):' \
+                '    if r.get("type") == "aws_security_group" and r.get("name") == "service":' \
+                '        print(r["values"].get("vpc_id", ""))' \
+                '        break' \
+                > /tmp/tf_vpc_id.py
 
-            IMAGE_URI="$(echo "$STATE_JSON" | python3 /tmp/tf_image_uri.py 2>/dev/null || true)"
-            VPC_ID="$(echo "$STATE_JSON" | python3 /tmp/tf_vpc_id.py 2>/dev/null || true)"
+              IMAGE_URI="$(echo "$STATE_JSON" | python3 /tmp/tf_image_uri.py 2>/dev/null || true)"
+              VPC_ID="$(echo "$STATE_JSON" | python3 /tmp/tf_vpc_id.py 2>/dev/null || true)"
+            fi
           fi
 
-          IMAGE_URI="${IMAGE_URI:-public.ecr.aws/docker/library/eclipse-temurin:21-jre}"
-          VPC_ID="${VPC_ID:-vpc-095bf825560175dae}"
+          # Si no pudimos leer del estado, usar valores por defecto
+          if [ -z "$IMAGE_URI" ]; then
+            IMAGE_URI="public.ecr.aws/docker/library/eclipse-temurin:21-jre"
+            echo "WARNING: Could not read IMAGE_URI from state, using default: $IMAGE_URI" >&2
+          fi
+
+          if [ -z "$VPC_ID" ]; then
+            VPC_ID="${{ inputs.vpc_id || 'vpc-095bf825560175dae' }}"
+            echo "WARNING: Could not read VPC_ID from state, using default: $VPC_ID" >&2
+          fi
 
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
           echo "VPC_ID=$VPC_ID" >> "$GITHUB_ENV"
           echo "Resolved IMAGE_URI=$IMAGE_URI"
           echo "Resolved VPC_ID=$VPC_ID"
+
+      - name: Import existing resources for teardown
+        run: |
+          set -euo pipefail
+          cd infra/terraform
+
+          # Función para importar si existe en AWS pero no en el estado
+          import_if_exists() {
+            local resource_name="$1"
+            local aws_id="$2"
+            local aws_cmd="$3"
+
+            if ! terraform state show "$resource_name" >/dev/null 2>&1; then
+              if eval "$aws_cmd" >/dev/null 2>&1; then
+                echo "Importing $resource_name ($aws_id) for teardown..."
+                terraform import -var="aws_region=${AWS_REGION}" -var="stack_name=${STACK_NAME}" -var="resource_prefix=${RESOURCE_PREFIX}" -var="image_uri=${IMAGE_URI}" "$resource_name" "$aws_id" || true
+              fi
+            fi
+          }
+
+          # Derivar nombres de recursos
+          EFFECTIVE_STACK_NAME="$STACK_NAME"
+          if [ -n "$RESOURCE_PREFIX" ]; then
+            EFFECTIVE_STACK_NAME="${RESOURCE_PREFIX}-${STACK_NAME}"
+          fi
+          NAME_SLUG=$(echo "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')
+          NAME_SLUG=$(echo "$NAME_SLUG" | sed 's/^-//;s/-$//')
+
+          if [ ${#NAME_SLUG} -le 24 ]; then
+            SHORT_NAME="$NAME_SLUG"
+          else
+            SHORT_NAME="${NAME_SLUG:0:15}-$(echo -n "$NAME_SLUG" | sha256sum | cut -c1-8)"
+          fi
+
+          INFRA_NAME="${SHORT_NAME}-app"
+          ECS_NAME="${NAME_SLUG}-app"
+          LOG_GROUP="/ecs/${INFRA_NAME}"
+          ECR_NAME="${NAME_SLUG}/app"
+
+          # Importar todos los recursos posibles para asegurar destrucción completa
+          import_if_exists "aws_ecr_repository.app" "$ECR_NAME" "aws ecr describe-repositories --repository-names '$ECR_NAME' 2>/dev/null"
+          import_if_exists "aws_cloudwatch_log_group.app" "$LOG_GROUP" "aws logs describe-log-groups --log-group-name-prefix '$LOG_GROUP' --query 'logGroups[?logGroupName==\`$LOG_GROUP\`]' | grep -q logGroupName"
+          import_if_exists "aws_ecs_cluster.app" "$ECS_NAME" "aws ecs describe-clusters --clusters '$ECS_NAME' --query 'clusters[0].clusterName' | grep -q '$ECS_NAME'"
+          import_if_exists "aws_iam_role.task_execution" "${INFRA_NAME}-exec" "aws iam get-role --role-name '${INFRA_NAME}-exec' 2>/dev/null"
+          import_if_exists "aws_iam_role.task" "${INFRA_NAME}-task" "aws iam get-role --role-name '${INFRA_NAME}-task' 2>/dev/null"
+          import_if_exists "aws_security_group.load_balancer" "${SHORT_NAME}-alb" "aws ec2 describe-security-groups --filters Name=group-name,Values='${SHORT_NAME}-alb' --query 'SecurityGroups[0].GroupName' | grep -q '${SHORT_NAME}-alb'"
+          import_if_exists "aws_security_group.service" "${SHORT_NAME}-svc" "aws ec2 describe-security-groups --filters Name=group-name,Values='${SHORT_NAME}-svc' --query 'SecurityGroups[0].GroupName' | grep -q '${SHORT_NAME}-svc'"
+
+          # Import ALB
+          ALB_ARN=$(aws elbv2 describe-load-balancers --names "$INFRA_NAME" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo '')
+          if [ -n "$ALB_ARN" ]; then
+            import_if_exists "aws_lb.app" "$ALB_ARN" "aws elbv2 describe-load-balancers --names '$INFRA_NAME' 2>/dev/null"
+          fi
+
+          # Import Target Group
+          TG_ARN=$(aws elbv2 describe-target-groups --names "$INFRA_NAME" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo '')
+          if [ -n "$TG_ARN" ]; then
+            import_if_exists "aws_lb_target_group.app" "$TG_ARN" "aws elbv2 describe-target-groups --names '$INFRA_NAME' 2>/dev/null"
+          fi
+
+          echo "Import for teardown completed"
 
       - name: Destroy ECS/Fargate stack
         run: |

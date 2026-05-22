@@ -273,7 +273,7 @@ jobs:
             -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="region=${AWS_REGION}"
 
-      - name: Ensure ECR repository
+      - name: Ensure ECR repository exists
         run: |
           set -euo pipefail
 
@@ -286,27 +286,21 @@ jobs:
           ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME#-}"
           ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME%-}/app"
 
-          if aws ecr describe-repositories --repository-names "$ECR_REPOSITORY_NAME" >/dev/null 2>&1; then
-            if ! terraform -chdir=infra/terraform state show aws_ecr_repository.app >/dev/null 2>&1; then
-              terraform -chdir=infra/terraform import \
-                -var="aws_region=${AWS_REGION}" \
-                -var="stack_name=${STACK_NAME}" \
-                -var="resource_prefix=${RESOURCE_PREFIX}" \
-                -var="image_uri=${IMAGE_URI_PLACEHOLDER}" \
-                aws_ecr_repository.app \
-                "$ECR_REPOSITORY_NAME"
-            fi
+          # Create ECR repository if it doesn't exist (via AWS CLI, not Terraform yet)
+          if ! aws ecr describe-repositories --repository-names "$ECR_REPOSITORY_NAME" >/dev/null 2>&1; then
+            echo "Creating ECR repository: $ECR_REPOSITORY_NAME"
+            aws ecr create-repository \
+              --repository-name "$ECR_REPOSITORY_NAME" \
+              --image-scanning-configuration scanOnPush=true
           fi
 
-          terraform -chdir=infra/terraform apply \
-            -target=aws_ecr_repository.app \
-            -auto-approve \
-            -var="aws_region=${AWS_REGION}" \
-            -var="stack_name=${STACK_NAME}" \
-            -var="resource_prefix=${RESOURCE_PREFIX}" \
-            -var="image_uri=${IMAGE_URI_PLACEHOLDER}"
+          # Derive repository URL
+          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+          ECR_REPOSITORY_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY_NAME}"
 
-          echo "ECR_REPOSITORY_URL=$(terraform -chdir=infra/terraform output -raw ecr_repository_url)" >> "$GITHUB_ENV"
+          echo "ECR_REPOSITORY_NAME=$ECR_REPOSITORY_NAME" >> "$GITHUB_ENV"
+          echo "ECR_REPOSITORY_URL=$ECR_REPOSITORY_URL" >> "$GITHUB_ENV"
+          echo "ECR_REPOSITORY_URL=$ECR_REPOSITORY_URL"
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
