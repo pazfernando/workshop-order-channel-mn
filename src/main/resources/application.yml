@@ -14,7 +14,7 @@ micronaut:
 
 order:
   api:
-    base-url: ${ORDER_API_BASE_URL:`https://z410yhtm4c.execute-api.us-east-1.amazonaws.com/`}
+    base-url: ${ORDER_API_BASE_URL:`https://6m4xld7nfb.execute-api.us-east-1.amazonaws.com/`}
 
 jackson:
   serialization:
