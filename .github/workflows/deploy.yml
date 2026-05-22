@@ -15,7 +15,7 @@ on:
       vpc_id:
         description: VPC ID where the service will be deployed
         required: false
-        default: ""
+        default: vpc-095bf825560175dae
         type: string
       log_retention_in_days:
         description: CloudWatch log retention in days
@@ -179,7 +179,7 @@ jobs:
       AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
       STACK_NAME: ${{ vars.STACK_NAME != '' && vars.STACK_NAME || 'order-satellite-service' }}
       RESOURCE_PREFIX: ${{ github.event_name == 'workflow_dispatch' && (inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-mn') || (vars.RESOURCE_PREFIX || 'aws-dev-mn') }}
-      VPC_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.vpc_id || vars.VPC_ID || '' }}
+      VPC_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.vpc_id || 'vpc-095bf825560175dae' }}
       LOG_RETENTION_IN_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.log_retention_in_days || vars.LOG_RETENTION_IN_DAYS || '1' }}
       EXPORT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.export_strategy || vars.EXPORT_STRATEGY || 'collector' }}
       COLLECTOR_TRACES_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_traces_endpoint || '' }}
