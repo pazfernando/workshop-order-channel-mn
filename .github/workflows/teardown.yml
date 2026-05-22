@@ -105,16 +105,9 @@ jobs:
             exit 1
           fi
 
-          ECR_REPOSITORY_NAME="$(printf '%s' "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
-          ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME#-}"
-          ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME%-}/app"
-
-          ECR_REPOSITORY_URL="$(aws ecr describe-repositories --repository-names "$ECR_REPOSITORY_NAME" --query 'repositories[0].repositoryUri' --output text 2>/dev/null || true)"
-
           {
             echo "TF_STATE_BUCKET=$BUCKET_NAME"
             echo "TF_STATE_KEY=$STATE_KEY"
-            echo "IMAGE_URI=${ECR_REPOSITORY_URL}:latest"
           } >> "$GITHUB_ENV"
 
       - name: Initialize Terraform
@@ -124,6 +117,46 @@ jobs:
             -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="region=${AWS_REGION}"
 
+      - name: Read variables from Terraform state
+        run: |
+          set -euo pipefail
+          STATE_JSON="$(terraform -chdir=infra/terraform show -json 2>/dev/null || true)"
+
+          IMAGE_URI=""
+          VPC_ID=""
+
+          if [ -n "$STATE_JSON" ] && echo "$STATE_JSON" | python3 -c "import sys,json; d=json.load(sys.stdin); exit(0 if d.get('values') else 1)" 2>/dev/null; then
+            printf '%s\n' \
+              'import sys, json' \
+              'd = json.load(sys.stdin)' \
+              'for r in d.get("values", {}).get("root_module", {}).get("resources", []):' \
+              '    if r.get("type") == "aws_ecs_task_definition" and r.get("name") == "app":' \
+              '        defs = json.loads(r["values"].get("container_definitions", "[]"))' \
+              '        if defs: print(defs[0].get("image", ""))' \
+              '        break' \
+              > /tmp/tf_image_uri.py
+
+            printf '%s\n' \
+              'import sys, json' \
+              'd = json.load(sys.stdin)' \
+              'for r in d.get("values", {}).get("root_module", {}).get("resources", []):' \
+              '    if r.get("type") == "aws_security_group" and r.get("name") == "service":' \
+              '        print(r["values"].get("vpc_id", ""))' \
+              '        break' \
+              > /tmp/tf_vpc_id.py
+
+            IMAGE_URI="$(echo "$STATE_JSON" | python3 /tmp/tf_image_uri.py 2>/dev/null || true)"
+            VPC_ID="$(echo "$STATE_JSON" | python3 /tmp/tf_vpc_id.py 2>/dev/null || true)"
+          fi
+
+          IMAGE_URI="${IMAGE_URI:-public.ecr.aws/docker/library/eclipse-temurin:21-jre}"
+          VPC_ID="${VPC_ID:-vpc-095bf825560175dae}"
+
+          echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
+          echo "VPC_ID=$VPC_ID" >> "$GITHUB_ENV"
+          echo "Resolved IMAGE_URI=$IMAGE_URI"
+          echo "Resolved VPC_ID=$VPC_ID"
+
       - name: Destroy ECS/Fargate stack
         run: |
           terraform -chdir=infra/terraform destroy \
@@ -131,4 +164,5 @@ jobs:
             -var="aws_region=${AWS_REGION}" \
             -var="stack_name=${STACK_NAME}" \
             -var="resource_prefix=${RESOURCE_PREFIX}" \
-            -var="image_uri=${IMAGE_URI}"
+            -var="image_uri=${IMAGE_URI}" \
+            -var="vpc_id=${VPC_ID}"
