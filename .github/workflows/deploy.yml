@@ -69,9 +69,6 @@ jobs:
     env:
       AWS_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
       AWS_DEFAULT_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
     outputs:
       validation_message: ${{ steps.contract-consumer.outputs.validation_message }}
       plan_json: ${{ steps.contract-consumer.outputs.plan_json }}
@@ -87,6 +84,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Export AWS credentials
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.AWS_CREDENTIALS }}" >> "$GITHUB_ENV"
 
       - name: Prepare effective observability contract
         env:
@@ -174,9 +176,6 @@ jobs:
       ENVIRONMENT_NAME: aws-dev
       AWS_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
       AWS_DEFAULT_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
-      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
       STACK_NAME: ${{ vars.STACK_NAME != '' && vars.STACK_NAME || 'order-satellite-service' }}
       RESOURCE_PREFIX: ${{ github.event_name == 'workflow_dispatch' && (inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-mn') || (vars.RESOURCE_PREFIX || 'aws-dev-mn') }}
       VPC_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.vpc_id || 'vpc-095bf825560175dae' }}
@@ -195,6 +194,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Export AWS credentials
+        run: |
+          set -euo pipefail
+          echo "${{ secrets.AWS_CREDENTIALS }}" >> "$GITHUB_ENV"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
