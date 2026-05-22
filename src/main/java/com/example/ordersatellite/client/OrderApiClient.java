@@ -10,6 +10,7 @@ import io.micronaut.http.annotation.PathVariable;
 import io.micronaut.http.annotation.Post;
 import io.micronaut.http.annotation.Produces;
 import io.micronaut.http.client.annotation.Client;
+import reactor.core.publisher.Mono;
 
 @Client("${order.api.base-url}")
 public interface OrderApiClient {
@@ -17,9 +18,9 @@ public interface OrderApiClient {
     @Post("/orders")
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
-    OrderResponse crearOrden(@Body OrderRequest request);
+    Mono<OrderResponse> crearOrden(@Body OrderRequest request);
 
     @Get("/orders/{orderId}")
     @Produces(MediaType.APPLICATION_JSON)
-    OrderResponse obtenerOrden(@PathVariable String orderId);
+    Mono<OrderResponse> obtenerOrden(@PathVariable String orderId);
 }
