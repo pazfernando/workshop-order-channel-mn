@@ -48,22 +48,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Export AWS credentials
-        run: |
-          set -euo pipefail
-          echo "${{ secrets.AWS_CREDENTIALS }}" >> "$GITHUB_ENV"
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
-
-      - name: Validate AWS runner credentials
-        run: |
-          set -euo pipefail
-          : "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID must be present in the runner environment}"
-          : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY must be present in the runner environment}"
-          : "${AWS_SESSION_TOKEN:?AWS_SESSION_TOKEN must be present in the runner environment}"
 
       - name: Resolve Terraform state backend
         run: |
