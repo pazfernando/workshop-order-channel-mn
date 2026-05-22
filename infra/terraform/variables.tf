@@ -13,7 +13,7 @@ variable "stack_name" {
 variable "resource_prefix" {
   description = "Environment/resource prefix used in resource names and Terraform state derivation."
   type        = string
-  default     = "aws-dev-1"
+  default     = "aws-dev-mn"
 
   validation {
     condition     = var.resource_prefix == "" || can(regex("^[A-Za-z0-9][A-Za-z0-9-]*$", var.resource_prefix))
@@ -24,6 +24,7 @@ variable "resource_prefix" {
 variable "image_uri" {
   description = "Container image URI to deploy to ECS."
   type        = string
+  default     = ""
 }
 
 variable "order_api_base_url" {
@@ -118,6 +119,12 @@ variable "direct_metrics_endpoint" {
   description = "Optional direct metrics endpoint override."
   type        = string
   default     = ""
+}
+
+variable "vpc_id" {
+  description = "VPC ID where the service will be deployed. Defaults to the account default VPC."
+  type        = string
+  default     = "vpc-095bf825560175dae"
 }
 
 variable "app_version" {

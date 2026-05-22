@@ -1,5 +1,5 @@
 name: Deploy
-run-name: ${{ format('Deploy ({0})', github.event_name == 'workflow_dispatch' && (inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-1') || (vars.RESOURCE_PREFIX || 'aws-dev-1')) }}
+run-name: ${{ format('Deploy ({0})', github.event_name == 'workflow_dispatch' && (inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-mn') || (vars.RESOURCE_PREFIX || 'aws-dev-mn')) }}
 
 on:
   push:
@@ -10,7 +10,12 @@ on:
       resource_prefix:
         description: Environment/resource prefix used in names and state derivation
         required: false
-        default: aws-dev-1
+        default: aws-dev-mn
+        type: string
+      vpc_id:
+        description: VPC ID where the service will be deployed
+        required: false
+        default: ""
         type: string
       log_retention_in_days:
         description: CloudWatch log retention in days
@@ -173,7 +178,8 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
       STACK_NAME: ${{ vars.STACK_NAME != '' && vars.STACK_NAME || 'order-satellite-service' }}
-      RESOURCE_PREFIX: ${{ github.event_name == 'workflow_dispatch' && (inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-1') || (vars.RESOURCE_PREFIX || 'aws-dev-1') }}
+      RESOURCE_PREFIX: ${{ github.event_name == 'workflow_dispatch' && (inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-mn') || (vars.RESOURCE_PREFIX || 'aws-dev-mn') }}
+      VPC_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.vpc_id || vars.VPC_ID || '' }}
       LOG_RETENTION_IN_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.log_retention_in_days || vars.LOG_RETENTION_IN_DAYS || '1' }}
       EXPORT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.export_strategy || vars.EXPORT_STRATEGY || 'collector' }}
       COLLECTOR_TRACES_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_traces_endpoint || '' }}
@@ -329,6 +335,7 @@ jobs:
             -var="image_uri=${IMAGE_URI}" \
             -var="order_api_base_url=${ORDER_API_BASE_URL}" \
             -var="log_retention_in_days=${LOG_RETENTION_IN_DAYS}" \
+            -var="vpc_id=${VPC_ID}" \
             -var="instrumentation_mode=javaagent" \
             -var="export_strategy=${EXPORT_STRATEGY}" \
             -var="collector_endpoint=${EFFECTIVE_COLLECTOR_ENDPOINT}" \

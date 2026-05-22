@@ -1,5 +1,5 @@
 name: Teardown
-run-name: ${{ format('Teardown ({0})', inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-1') }}
+run-name: ${{ format('Teardown ({0})', inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-mn') }}
 
 on:
   workflow_dispatch:
@@ -7,34 +7,13 @@ on:
       resource_prefix:
         description: Environment/resource prefix used in names and state derivation
         required: false
-        default: aws-dev-1
+        default: aws-dev-mn
         type: string
       confirm_stack:
         description: Type the exact effective stack name to confirm teardown, including resource prefix when used
         required: true
-        default: aws-dev-1-order-satellite-service
+        default: aws-dev-mn-order-satellite-service
         type: string
-      log_retention_in_days:
-        description: CloudWatch log retention in days
-        required: false
-        default: "1"
-        type: string
-      instrumentation_mode:
-        description: ECS Java instrumentation mode
-        required: false
-        default: javaagent
-        type: choice
-        options:
-          - code
-          - javaagent
-      export_strategy:
-        description: Telemetry export path applied to traces and metrics
-        required: false
-        default: collector
-        type: choice
-        options:
-          - collector
-          - direct
 
 jobs:
   teardown:
@@ -51,14 +30,9 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
       STACK_NAME: ${{ vars.STACK_NAME != '' && vars.STACK_NAME || 'order-satellite-service' }}
-      RESOURCE_PREFIX: ${{ inputs.resource_prefix != '' && inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-1' }}
-      LOG_RETENTION_IN_DAYS: ${{ inputs.log_retention_in_days != '' && inputs.log_retention_in_days || vars.LOG_RETENTION_IN_DAYS || '1' }}
-      INSTRUMENTATION_MODE: ${{ inputs.instrumentation_mode != '' && inputs.instrumentation_mode || vars.INSTRUMENTATION_MODE || 'javaagent' }}
-      EXPORT_STRATEGY: ${{ inputs.export_strategy != '' && inputs.export_strategy || vars.EXPORT_STRATEGY || 'collector' }}
+      RESOURCE_PREFIX: ${{ inputs.resource_prefix != '' && inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-mn' }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
-      IMAGE_URI_PLACEHOLDER: public.ecr.aws/docker/library/eclipse-temurin:21-jre
-      ORDER_API_BASE_URL: ${{ vars.ORDER_API_BASE_URL || 'https://z410yhtm4c.execute-api.us-east-1.amazonaws.com' }}
 
     steps:
       - name: Validate confirmation
@@ -131,9 +105,16 @@ jobs:
             exit 1
           fi
 
+          ECR_REPOSITORY_NAME="$(printf '%s' "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME#-}"
+          ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME%-}/app"
+
+          ECR_REPOSITORY_URL="$(aws ecr describe-repositories --repository-names "$ECR_REPOSITORY_NAME" --query 'repositories[0].repositoryUri' --output text 2>/dev/null || true)"
+
           {
             echo "TF_STATE_BUCKET=$BUCKET_NAME"
             echo "TF_STATE_KEY=$STATE_KEY"
+            echo "IMAGE_URI=${ECR_REPOSITORY_URL}:latest"
           } >> "$GITHUB_ENV"
 
       - name: Initialize Terraform
@@ -150,8 +131,4 @@ jobs:
             -var="aws_region=${AWS_REGION}" \
             -var="stack_name=${STACK_NAME}" \
             -var="resource_prefix=${RESOURCE_PREFIX}" \
-            -var="image_uri=${IMAGE_URI_PLACEHOLDER}" \
-            -var="order_api_base_url=${ORDER_API_BASE_URL}" \
-            -var="log_retention_in_days=${LOG_RETENTION_IN_DAYS}" \
-            -var="instrumentation_mode=${INSTRUMENTATION_MODE}" \
-            -var="export_strategy=${EXPORT_STRATEGY}"
+            -var="image_uri=${IMAGE_URI}"
