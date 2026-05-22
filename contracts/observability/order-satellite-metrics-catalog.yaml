@@ -1,33 +1,13 @@
 metrics:
-  - name: InboundRequestCount
-    type: counter
-    unit: "{request}"
-    description: Total inbound HTTP requests handled by the service.
-    dimensions: ["http.route", "http.request.method", "http.response.status_code"]
-  - name: InboundRequestDuration
+  - name: http.server.request.duration
     type: histogram
-    unit: "ms"
-    description: End-to-end inbound HTTP request latency.
+    unit: "s"
+    description: HTTP server request duration emitted by OpenTelemetry instrumentation.
     dimensions: ["http.route", "http.request.method", "http.response.status_code"]
-  - name: InboundRequestErrors
-    type: counter
-    unit: "{error}"
-    description: Inbound HTTP requests that completed with server-side failure conditions.
-    dimensions: ["http.route", "http.request.method", "http.response.status_code"]
-  - name: OutboundDependencyCallCount
-    type: counter
-    unit: "{call}"
-    description: Total outbound calls from the service to the order API dependency.
-    dimensions: ["dependency.name", "dependency.operation", "result"]
-  - name: OutboundDependencyCallDuration
+  - name: http.client.request.duration
     type: histogram
-    unit: "ms"
-    description: Outbound dependency call latency for the order API.
-    dimensions: ["dependency.name", "dependency.operation"]
-  - name: OutboundDependencyCallErrors
-    type: counter
-    unit: "{error}"
-    description: Outbound dependency calls that ended in failure.
-    dimensions: ["dependency.name", "dependency.operation"]
+    unit: "s"
+    description: HTTP client request duration emitted by OpenTelemetry instrumentation.
+    dimensions: ["server.address", "http.request.method", "http.response.status_code"]
 logs:
   format: json

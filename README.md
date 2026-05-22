@@ -8,7 +8,8 @@ Aplicacion demo Micronaut que expone una interfaz HTML sin autenticacion para cr
 - API local en `/api/orders` que delega al cliente HTTP declarativo.
 - Cliente Micronaut `@Client` apuntando a `https://z410yhtm4c.execute-api.us-east-1.amazonaws.com`.
 - Contrato IDP de observabilidad en `contracts/observability/observability-contract.yaml`.
-- Catalogo complementario de metricas/logs en `contracts/observability/order-satellite-metrics-catalog.yaml`, alineado con el preset `distributed-service`.
+- Catalogo complementario de metricas/logs en `contracts/observability/order-satellite-metrics-catalog.yaml`, alineado con el preset `monolith-business-app`.
+- Instrumentacion OpenTelemetry Java agent para metricas HTTP/JVM estandar exportadas por OTLP.
 - Metricas Micrometer locales:
   - `orders.created.total`
   - `orders.processing.duration`
@@ -47,7 +48,6 @@ Inputs principales de `Deploy`:
 
 - `resource_prefix`: prefijo de recursos y estado Terraform.
 - `log_retention_in_days`: retencion de logs de CloudWatch.
-- `instrumentation_mode`: `javaagent` habilita el agente OpenTelemetry embebido en la imagen; `code` deja la instrumentacion en manos de la aplicacion.
 - `export_strategy`: `collector` o `direct`; el workflow genera un contrato efectivo antes de llamar al IDP.
 - `collector_endpoint`, `collector_traces_endpoint`, `collector_metrics_endpoint`: overrides OTLP opcionales para collector mode.
 - `direct_endpoint`, `direct_traces_endpoint`, `direct_metrics_endpoint`: endpoints OTLP opcionales para direct mode en ECS/Fargate.
@@ -68,6 +68,8 @@ Variables opcionales:
 
 El workflow de observabilidad usa `pazfernando/workshop-idp-o11y/.github/actions/contract-consumer@main` sobre el contrato efectivo. Para ECS/Fargate no se generan bindings Lambda; se usa el IDP para validacion, plan y resolucion del endpoint del collector administrado cuando `export_strategy=collector`.
 
+La instrumentacion de este workload no es configurable desde el workflow: la imagen incluye el OpenTelemetry Java agent y Terraform lo habilita siempre con `javaagent`.
+
 ## Estructura
 
 ```text
@@ -83,4 +85,4 @@ infra/terraform
 .github/workflows
 ```
 
-Nota: el contrato declara `spec.telemetry.signals.metrics.catalog` con metricas soportadas por el preset `distributed-service`. El archivo complementario conserva el mismo catalogo para lectura rapida.
+Nota: el contrato declara `spec.telemetry.signals.metrics.catalog` con metricas OpenTelemetry soportadas por el preset `monolith-business-app`. El archivo complementario conserva el mismo catalogo para lectura rapida.

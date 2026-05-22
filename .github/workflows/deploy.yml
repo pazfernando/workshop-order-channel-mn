@@ -17,14 +17,6 @@ on:
         required: false
         default: "1"
         type: string
-      instrumentation_mode:
-        description: ECS Java instrumentation mode
-        required: false
-        default: javaagent
-        type: choice
-        options:
-          - code
-          - javaagent
       export_strategy:
         description: Telemetry export path applied to traces and metrics in the effective contract
         required: false
@@ -152,7 +144,6 @@ jobs:
           contract_path: build/observability/observability-contract.effective.yaml
           upload_artifacts: true
           generate_bindings: false
-          instrumentation_mode: code
           collector_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_endpoint || '' }}
           collector_traces_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_traces_endpoint || '' }}
           collector_metrics_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_metrics_endpoint || '' }}
@@ -184,7 +175,6 @@ jobs:
       STACK_NAME: ${{ vars.STACK_NAME != '' && vars.STACK_NAME || 'order-satellite-service' }}
       RESOURCE_PREFIX: ${{ github.event_name == 'workflow_dispatch' && (inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-1') || (vars.RESOURCE_PREFIX || 'aws-dev-1') }}
       LOG_RETENTION_IN_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.log_retention_in_days || vars.LOG_RETENTION_IN_DAYS || '1' }}
-      INSTRUMENTATION_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.instrumentation_mode || vars.INSTRUMENTATION_MODE || 'javaagent' }}
       EXPORT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.export_strategy || vars.EXPORT_STRATEGY || 'collector' }}
       COLLECTOR_TRACES_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_traces_endpoint || '' }}
       COLLECTOR_METRICS_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_metrics_endpoint || '' }}
@@ -339,7 +329,7 @@ jobs:
             -var="image_uri=${IMAGE_URI}" \
             -var="order_api_base_url=${ORDER_API_BASE_URL}" \
             -var="log_retention_in_days=${LOG_RETENTION_IN_DAYS}" \
-            -var="instrumentation_mode=${INSTRUMENTATION_MODE}" \
+            -var="instrumentation_mode=javaagent" \
             -var="export_strategy=${EXPORT_STRATEGY}" \
             -var="collector_endpoint=${EFFECTIVE_COLLECTOR_ENDPOINT}" \
             -var="collector_traces_endpoint=${COLLECTOR_TRACES_ENDPOINT}" \
