@@ -10,11 +10,13 @@ locals {
   effective_name = var.resource_prefix != "" ? "${var.resource_prefix}-${var.stack_name}" : var.stack_name
   name_slug      = trim(replace(lower(local.effective_name), "/[^a-z0-9-]/", "-"), "-")
   short_name     = length(local.name_slug) <= 24 ? local.name_slug : "${substr(local.name_slug, 0, 15)}-${substr(sha256(local.name_slug), 0, 8)}"
+  infra_name     = "${local.short_name}-app"
+  ecs_name       = "${local.name_slug}-app"
 
   service_name           = "order-satellite-service"
   service_namespace      = "observability-demo"
   deployment_environment = "dev"
-  log_group_name         = "/ecs/${local.name_slug}"
+  log_group_name         = "/ecs/${local.infra_name}"
   public_azs             = slice(data.aws_availability_zones.available.names, 0, 2)
   public_subnet_cidrs    = ["10.42.0.0/24", "10.42.1.0/24"]
 
@@ -191,7 +193,7 @@ resource "aws_cloudwatch_log_group" "app" {
 }
 
 resource "aws_ecs_cluster" "app" {
-  name = local.name_slug
+  name = local.ecs_name
 
   setting {
     name  = "containerInsights"
@@ -202,7 +204,7 @@ resource "aws_ecs_cluster" "app" {
 }
 
 resource "aws_iam_role" "task_execution" {
-  name = "${local.short_name}-exec"
+  name = "${local.infra_name}-exec"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -226,7 +228,7 @@ resource "aws_iam_role_policy_attachment" "task_execution" {
 }
 
 resource "aws_iam_role" "task" {
-  name = "${local.short_name}-task"
+  name = "${local.infra_name}-task"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -289,7 +291,7 @@ resource "aws_security_group" "service" {
 }
 
 resource "aws_lb" "app" {
-  name               = local.short_name
+  name               = local.infra_name
   load_balancer_type = "application"
   security_groups    = [aws_security_group.load_balancer.id]
   subnets            = aws_subnet.public[*].id
@@ -298,7 +300,7 @@ resource "aws_lb" "app" {
 }
 
 resource "aws_lb_target_group" "app" {
-  name        = local.short_name
+  name        = local.infra_name
   port        = var.container_port
   protocol    = "HTTP"
   target_type = "ip"
@@ -331,7 +333,7 @@ resource "aws_lb_listener" "http" {
 }
 
 resource "aws_ecs_task_definition" "app" {
-  family                   = local.name_slug
+  family                   = local.ecs_name
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
   cpu                      = var.task_cpu
@@ -378,7 +380,7 @@ resource "aws_ecs_task_definition" "app" {
 }
 
 resource "aws_ecs_service" "app" {
-  name            = local.name_slug
+  name            = local.ecs_name
   cluster         = aws_ecs_cluster.app.id
   task_definition = aws_ecs_task_definition.app.arn
   desired_count   = var.desired_count
