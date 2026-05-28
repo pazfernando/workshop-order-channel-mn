@@ -125,9 +125,25 @@ jobs:
           set -euo pipefail
           cd infra/terraform
 
-          # Intentar leer del estado primero
           IMAGE_URI=""
           VPC_ID=""
+
+          EFFECTIVE_STACK_NAME="$STACK_NAME"
+          if [ -n "$RESOURCE_PREFIX" ]; then
+            EFFECTIVE_STACK_NAME="${RESOURCE_PREFIX}-${STACK_NAME}"
+          fi
+
+          NAME_SLUG="$(printf '%s' "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          NAME_SLUG="${NAME_SLUG#-}"
+          NAME_SLUG="${NAME_SLUG%-}"
+
+          if [ "${#NAME_SLUG}" -le 24 ]; then
+            SHORT_NAME="$NAME_SLUG"
+          else
+            SHORT_NAME="${NAME_SLUG:0:15}-$(printf '%s' "$NAME_SLUG" | sha256sum | cut -c1-8)"
+          fi
+
+          INFRA_NAME="${SHORT_NAME}-app"
 
           if terraform state list >/dev/null 2>&1; then
             STATE_JSON="$(terraform show -json 2>/dev/null || true)"
@@ -156,7 +172,6 @@ jobs:
             fi
           fi
 
-          # Si no pudimos leer del estado, usar valores por defecto
           if [ -z "$IMAGE_URI" ]; then
             IMAGE_URI="public.ecr.aws/docker/library/eclipse-temurin:21-jre"
             echo "WARNING: Could not read IMAGE_URI from state, using default: $IMAGE_URI" >&2
@@ -168,7 +183,37 @@ jobs:
           fi
 
           if [ -z "$VPC_ID" ]; then
-            echo "VPC_ID is required when it cannot be read from Terraform state. Provide input 'vpc_id' or configure repository/environment variable 'VPC_ID'." >&2
+            VPC_ID="$(aws ec2 describe-security-groups \
+              --filters "Name=group-name,Values=${SHORT_NAME}-svc" \
+              --query 'SecurityGroups[0].VpcId' \
+              --output text 2>/dev/null || true)"
+            if [ "$VPC_ID" = "None" ]; then
+              VPC_ID=""
+            fi
+          fi
+
+          if [ -z "$VPC_ID" ]; then
+            VPC_ID="$(aws ec2 describe-security-groups \
+              --filters "Name=group-name,Values=${SHORT_NAME}-alb" \
+              --query 'SecurityGroups[0].VpcId' \
+              --output text 2>/dev/null || true)"
+            if [ "$VPC_ID" = "None" ]; then
+              VPC_ID=""
+            fi
+          fi
+
+          if [ -z "$VPC_ID" ]; then
+            VPC_ID="$(aws elbv2 describe-load-balancers \
+              --names "$INFRA_NAME" \
+              --query 'LoadBalancers[0].VpcId' \
+              --output text 2>/dev/null || true)"
+            if [ "$VPC_ID" = "None" ]; then
+              VPC_ID=""
+            fi
+          fi
+
+          if [ -z "$VPC_ID" ]; then
+            echo "VPC_ID is required when it cannot be read from Terraform state or discovered from AWS resources. Provide input 'vpc_id' or configure vars.VPC_ID." >&2
             exit 1
           fi
 
@@ -182,58 +227,99 @@ jobs:
           set -euo pipefail
           cd infra/terraform
 
-          # Función para importar si existe en AWS pero no en el estado
           import_if_exists() {
             local resource_name="$1"
             local aws_id="$2"
-            local aws_cmd="$3"
 
-            if ! terraform state show "$resource_name" >/dev/null 2>&1; then
-              if eval "$aws_cmd" >/dev/null 2>&1; then
-                echo "Importing $resource_name ($aws_id) for teardown..."
-                terraform import -var="aws_region=${AWS_REGION}" -var="stack_name=${STACK_NAME}" -var="resource_prefix=${RESOURCE_PREFIX}" -var="image_uri=${IMAGE_URI}" "$resource_name" "$aws_id" || true
-              fi
+            if terraform state show "$resource_name" >/dev/null 2>&1; then
+              echo "$resource_name is already managed by Terraform state."
+              return
             fi
+
+            if [ -z "$aws_id" ] || [ "$aws_id" = "None" ]; then
+              echo "$resource_name does not exist in AWS."
+              return
+            fi
+
+            echo "Importing $resource_name ($aws_id) for teardown..."
+            terraform import "${TF_IMPORT_VARS[@]}" "$resource_name" "$aws_id"
           }
 
-          # Derivar nombres de recursos
           EFFECTIVE_STACK_NAME="$STACK_NAME"
           if [ -n "$RESOURCE_PREFIX" ]; then
             EFFECTIVE_STACK_NAME="${RESOURCE_PREFIX}-${STACK_NAME}"
           fi
-          NAME_SLUG=$(echo "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')
-          NAME_SLUG=$(echo "$NAME_SLUG" | sed 's/^-//;s/-$//')
+          NAME_SLUG="$(printf '%s' "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          NAME_SLUG="${NAME_SLUG#-}"
+          NAME_SLUG="${NAME_SLUG%-}"
 
-          if [ ${#NAME_SLUG} -le 24 ]; then
+          if [ "${#NAME_SLUG}" -le 24 ]; then
             SHORT_NAME="$NAME_SLUG"
           else
-            SHORT_NAME="${NAME_SLUG:0:15}-$(echo -n "$NAME_SLUG" | sha256sum | cut -c1-8)"
+            SHORT_NAME="${NAME_SLUG:0:15}-$(printf '%s' "$NAME_SLUG" | sha256sum | cut -c1-8)"
           fi
 
           INFRA_NAME="${SHORT_NAME}-app"
           ECS_NAME="${NAME_SLUG}-app"
           LOG_GROUP="/ecs/${INFRA_NAME}"
           ECR_NAME="${NAME_SLUG}/app"
+          EXEC_POLICY_ARN="arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 
-          # Importar todos los recursos posibles para asegurar destrucción completa
-          import_if_exists "aws_ecr_repository.app" "$ECR_NAME" "aws ecr describe-repositories --repository-names '$ECR_NAME' 2>/dev/null"
-          import_if_exists "aws_cloudwatch_log_group.app" "$LOG_GROUP" "aws logs describe-log-groups --log-group-name-prefix '$LOG_GROUP' --query 'logGroups[?logGroupName==\`$LOG_GROUP\`]' | grep -q logGroupName"
-          import_if_exists "aws_ecs_cluster.app" "$ECS_NAME" "aws ecs describe-clusters --clusters '$ECS_NAME' --query 'clusters[0].clusterName' | grep -q '$ECS_NAME'"
-          import_if_exists "aws_iam_role.task_execution" "${INFRA_NAME}-exec" "aws iam get-role --role-name '${INFRA_NAME}-exec' 2>/dev/null"
-          import_if_exists "aws_iam_role.task" "${INFRA_NAME}-task" "aws iam get-role --role-name '${INFRA_NAME}-task' 2>/dev/null"
-          import_if_exists "aws_security_group.load_balancer" "${SHORT_NAME}-alb" "aws ec2 describe-security-groups --filters Name=group-name,Values='${SHORT_NAME}-alb' --query 'SecurityGroups[0].GroupName' | grep -q '${SHORT_NAME}-alb'"
-          import_if_exists "aws_security_group.service" "${SHORT_NAME}-svc" "aws ec2 describe-security-groups --filters Name=group-name,Values='${SHORT_NAME}-svc' --query 'SecurityGroups[0].GroupName' | grep -q '${SHORT_NAME}-svc'"
+          TF_IMPORT_VARS=(
+            -var="aws_region=${AWS_REGION}"
+            -var="stack_name=${STACK_NAME}"
+            -var="resource_prefix=${RESOURCE_PREFIX}"
+            -var="image_uri=${IMAGE_URI}"
+            -var="order_api_base_url=https://example.invalid/"
+            -var="log_retention_in_days=1"
+            -var="vpc_id=${VPC_ID}"
+            -var="instrumentation_mode=javaagent"
+            -var="export_strategy=collector"
+          )
 
-          # Import ALB
-          ALB_ARN=$(aws elbv2 describe-load-balancers --names "$INFRA_NAME" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || echo '')
-          if [ -n "$ALB_ARN" ]; then
-            import_if_exists "aws_lb.app" "$ALB_ARN" "aws elbv2 describe-load-balancers --names '$INFRA_NAME' 2>/dev/null"
+          ECR_ID="$(aws ecr describe-repositories --repository-names "$ECR_NAME" --query 'repositories[0].repositoryName' --output text 2>/dev/null || true)"
+          import_if_exists "aws_ecr_repository.app" "$ECR_ID"
+
+          LOG_GROUP_ID="$(aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP" --query "logGroups[?logGroupName=='${LOG_GROUP}'].logGroupName | [0]" --output text 2>/dev/null || true)"
+          import_if_exists "aws_cloudwatch_log_group.app" "$LOG_GROUP_ID"
+
+          ECS_CLUSTER_ID="$(aws ecs describe-clusters --clusters "$ECS_NAME" --query 'clusters[0].clusterName' --output text 2>/dev/null || true)"
+          import_if_exists "aws_ecs_cluster.app" "$ECS_CLUSTER_ID"
+
+          EXEC_ROLE_ID="$(aws iam get-role --role-name "${INFRA_NAME}-exec" --query 'Role.RoleName' --output text 2>/dev/null || true)"
+          import_if_exists "aws_iam_role.task_execution" "$EXEC_ROLE_ID"
+
+          ATTACHED_EXEC_POLICY="$(aws iam list-attached-role-policies --role-name "${INFRA_NAME}-exec" --query "AttachedPolicies[?PolicyArn=='${EXEC_POLICY_ARN}'].PolicyArn | [0]" --output text 2>/dev/null || true)"
+          if [ -n "$ATTACHED_EXEC_POLICY" ] && [ "$ATTACHED_EXEC_POLICY" != "None" ]; then
+            import_if_exists "aws_iam_role_policy_attachment.task_execution" "${INFRA_NAME}-exec/${EXEC_POLICY_ARN}"
           fi
 
-          # Import Target Group
-          TG_ARN=$(aws elbv2 describe-target-groups --names "$INFRA_NAME" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || echo '')
-          if [ -n "$TG_ARN" ]; then
-            import_if_exists "aws_lb_target_group.app" "$TG_ARN" "aws elbv2 describe-target-groups --names '$INFRA_NAME' 2>/dev/null"
+          TASK_ROLE_ID="$(aws iam get-role --role-name "${INFRA_NAME}-task" --query 'Role.RoleName' --output text 2>/dev/null || true)"
+          import_if_exists "aws_iam_role.task" "$TASK_ROLE_ID"
+
+          ALB_SG_ID="$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=${SHORT_NAME}-alb" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)"
+          import_if_exists "aws_security_group.load_balancer" "$ALB_SG_ID"
+
+          SERVICE_SG_ID="$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=${VPC_ID}" "Name=group-name,Values=${SHORT_NAME}-svc" --query 'SecurityGroups[0].GroupId' --output text 2>/dev/null || true)"
+          import_if_exists "aws_security_group.service" "$SERVICE_SG_ID"
+
+          ALB_ARN="$(aws elbv2 describe-load-balancers --names "$INFRA_NAME" --query 'LoadBalancers[0].LoadBalancerArn' --output text 2>/dev/null || true)"
+          import_if_exists "aws_lb.app" "$ALB_ARN"
+
+          TG_ARN="$(aws elbv2 describe-target-groups --names "$INFRA_NAME" --query 'TargetGroups[0].TargetGroupArn' --output text 2>/dev/null || true)"
+          import_if_exists "aws_lb_target_group.app" "$TG_ARN"
+
+          if [ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ]; then
+            LISTENER_ARN="$(aws elbv2 describe-listeners --load-balancer-arn "$ALB_ARN" --query 'Listeners[?Port==`80`].ListenerArn | [0]' --output text 2>/dev/null || true)"
+            import_if_exists "aws_lb_listener.http" "$LISTENER_ARN"
+          fi
+
+          TASK_DEFINITION_ARN="$(aws ecs describe-task-definition --task-definition "$ECS_NAME" --query 'taskDefinition.taskDefinitionArn' --output text 2>/dev/null || true)"
+          import_if_exists "aws_ecs_task_definition.app" "$TASK_DEFINITION_ARN"
+
+          ECS_SERVICE_ARN="$(aws ecs describe-services --cluster "$ECS_NAME" --services "$ECS_NAME" --query "services[?status!='INACTIVE'].serviceArn | [0]" --output text 2>/dev/null || true)"
+          if [ -n "$ECS_SERVICE_ARN" ] && [ "$ECS_SERVICE_ARN" != "None" ]; then
+            import_if_exists "aws_ecs_service.app" "${ECS_NAME}/${ECS_NAME}"
           fi
 
           echo "Import for teardown completed"
@@ -246,4 +332,8 @@ jobs:
             -var="stack_name=${STACK_NAME}" \
             -var="resource_prefix=${RESOURCE_PREFIX}" \
             -var="image_uri=${IMAGE_URI}" \
-            -var="vpc_id=${VPC_ID}"
+            -var="order_api_base_url=https://example.invalid/" \
+            -var="log_retention_in_days=1" \
+            -var="vpc_id=${VPC_ID}" \
+            -var="instrumentation_mode=javaagent" \
+            -var="export_strategy=collector"
