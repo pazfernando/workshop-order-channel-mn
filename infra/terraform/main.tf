@@ -2,10 +2,6 @@ provider "aws" {
   region = var.aws_region
 }
 
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
 locals {
   effective_name = var.resource_prefix != "" ? "${var.resource_prefix}-${var.stack_name}" : var.stack_name
   name_slug      = trim(replace(lower(local.effective_name), "/[^a-z0-9-]/", "-"), "-")
@@ -17,12 +13,30 @@ locals {
   service_namespace      = "observability-demo"
   deployment_environment = "dev"
   log_group_name         = "/ecs/${local.infra_name}"
-  public_azs             = slice(data.aws_availability_zones.available.names, 0, 2)
-  public_subnet_ids_by_az = {
-    for subnet in data.aws_subnet.public : subnet.availability_zone => subnet.id...
-  }
-  public_subnet_ids = [
-    for az in sort(keys(local.public_subnet_ids_by_az)) : sort(local.public_subnet_ids_by_az[az])[0]
+  internet_gateway_route_table_ids = toset([
+    for route_table in data.aws_route_table.app : route_table.id
+    if anytrue([
+      for route in route_table.routes :
+      try(route.cidr_block, "") == "0.0.0.0/0" && try(startswith(route.gateway_id, "igw-"), false)
+    ])
+  ])
+  main_route_table_ids = [
+    for route_table in data.aws_route_table.app : route_table.id
+    if anytrue([for association in route_table.associations : try(association.main, false)])
+  ]
+  main_route_table_id = length(local.main_route_table_ids) > 0 ? local.main_route_table_ids[0] : ""
+  explicit_route_table_id_by_subnet_id = merge({}, [
+    for route_table in data.aws_route_table.app : {
+      for association in route_table.associations : association.subnet_id => route_table.id
+      if try(association.subnet_id, "") != ""
+    }
+  ]...)
+  discovered_public_subnet_ids = [
+    for subnet_id in data.aws_subnets.app.ids : subnet_id
+    if contains(
+      local.internet_gateway_route_table_ids,
+      lookup(local.explicit_route_table_id_by_subnet_id, subnet_id, local.main_route_table_id)
+    )
   ]
 
   otlp_base_endpoint    = var.export_strategy == "collector" ? trimspace(var.collector_endpoint) : ""
@@ -128,22 +142,39 @@ data "aws_vpc" "app" {
   id = var.vpc_id
 }
 
-data "aws_subnets" "public" {
+data "aws_subnets" "app" {
   filter {
     name   = "vpc-id"
     values = [data.aws_vpc.app.id]
   }
+}
 
+data "aws_route_tables" "app" {
   filter {
-    name   = "availability-zone"
-    values = local.public_azs
+    name   = "vpc-id"
+    values = [data.aws_vpc.app.id]
   }
 }
 
+data "aws_route_table" "app" {
+  for_each = toset(data.aws_route_tables.app.ids)
+
+  route_table_id = each.value
+}
+
 data "aws_subnet" "public" {
-  for_each = toset(data.aws_subnets.public.ids)
+  for_each = toset(local.discovered_public_subnet_ids)
 
   id = each.value
+}
+
+locals {
+  public_subnet_ids_by_az = {
+    for subnet in data.aws_subnet.public : subnet.availability_zone => subnet.id...
+  }
+  public_subnet_ids = [
+    for az in sort(keys(local.public_subnet_ids_by_az)) : sort(local.public_subnet_ids_by_az[az])[0]
+  ]
 }
 
 resource "aws_ecr_repository" "app" {
@@ -272,7 +303,12 @@ resource "aws_lb" "app" {
   lifecycle {
     precondition {
       condition     = length(local.public_subnet_ids) >= 2
-      error_message = "At least two subnets in distinct Availability Zones are required to create the application load balancer."
+      error_message = "At least two public subnets in distinct Availability Zones are required to create the internet-facing application load balancer. Public subnets are discovered from route tables with a 0.0.0.0/0 route to an Internet Gateway."
+    }
+
+    precondition {
+      condition     = length(local.internet_gateway_route_table_ids) > 0
+      error_message = "The selected VPC must have at least one route table with a 0.0.0.0/0 route to an Internet Gateway."
     }
   }
 

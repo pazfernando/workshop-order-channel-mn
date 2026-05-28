@@ -47,7 +47,7 @@ El despliegue es manual-only y siempre usa un prefijo. El input `resource_prefix
 Inputs principales de `Deploy`:
 
 - `resource_prefix`: prefijo de recursos y estado Terraform.
-- `vpc_id`: VPC destino obligatoria para ejecuciones manuales.
+- `vpc_id`: VPC destino obligatoria para ejecuciones manuales. Terraform auto-detecta las subredes publicas buscando route tables con ruta `0.0.0.0/0` hacia un Internet Gateway.
 - `log_retention_in_days`: retencion de logs de CloudWatch.
 - `export_strategy`: `collector` o `direct`; el workflow genera un contrato efectivo antes de llamar al IDP. `collector` reutiliza la management suite del IDP cuando no se proveen overrides, mientras que `direct` despliega solo contra AWS sin suite administrada ni endpoints OTLP externos.
 - `collector_endpoint`, `collector_traces_endpoint`, `collector_metrics_endpoint`: overrides OTLP opcionales para collector mode. Si se provee `collector_endpoint`, este endpoint explicito toma precedencia sobre la management suite.
