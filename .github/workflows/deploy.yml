@@ -1,10 +1,7 @@
 name: Deploy
-run-name: ${{ format('Deploy ({0})', github.event_name == 'workflow_dispatch' && (inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-mn') || (vars.RESOURCE_PREFIX || 'aws-dev-mn')) }}
+run-name: ${{ format('Deploy ({0})', inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-mn') }}
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       resource_prefix:
@@ -14,8 +11,7 @@ on:
         type: string
       vpc_id:
         description: VPC ID where the service will be deployed
-        required: false
-        default: vpc-095bf825560175dae
+        required: true
         type: string
       log_retention_in_days:
         description: CloudWatch log retention in days
@@ -97,7 +93,7 @@ jobs:
         env:
           SOURCE_CONTRACT_PATH: contracts/observability/observability-contract.yaml
           EFFECTIVE_CONTRACT_PATH: build/observability/observability-contract.effective.yaml
-          EXPORT_STRATEGY_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.export_strategy || 'collector' }}
+          EXPORT_STRATEGY_INPUT: ${{ inputs.export_strategy || 'collector' }}
         run: |
           set -euo pipefail
           mkdir -p build/observability
@@ -120,13 +116,13 @@ jobs:
 
       - name: Validate workflow input combination
         env:
-          EXPORT_STRATEGY_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.export_strategy || 'collector' }}
-          COLLECTOR_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_endpoint || '' }}
-          COLLECTOR_TRACES_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_traces_endpoint || '' }}
-          COLLECTOR_METRICS_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_metrics_endpoint || '' }}
-          DIRECT_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_endpoint || '' }}
-          DIRECT_TRACES_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_traces_endpoint || '' }}
-          DIRECT_METRICS_ENDPOINT_INPUT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_metrics_endpoint || '' }}
+          EXPORT_STRATEGY_INPUT: ${{ inputs.export_strategy || 'collector' }}
+          COLLECTOR_ENDPOINT_INPUT: ${{ inputs.collector_endpoint || '' }}
+          COLLECTOR_TRACES_ENDPOINT_INPUT: ${{ inputs.collector_traces_endpoint || '' }}
+          COLLECTOR_METRICS_ENDPOINT_INPUT: ${{ inputs.collector_metrics_endpoint || '' }}
+          DIRECT_ENDPOINT_INPUT: ${{ inputs.direct_endpoint || '' }}
+          DIRECT_TRACES_ENDPOINT_INPUT: ${{ inputs.direct_traces_endpoint || '' }}
+          DIRECT_METRICS_ENDPOINT_INPUT: ${{ inputs.direct_metrics_endpoint || '' }}
         run: |
           set -euo pipefail
 
@@ -147,12 +143,12 @@ jobs:
           contract_path: build/observability/observability-contract.effective.yaml
           upload_artifacts: true
           generate_bindings: false
-          collector_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_endpoint || '' }}
-          collector_traces_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_traces_endpoint || '' }}
-          collector_metrics_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_metrics_endpoint || '' }}
-          direct_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_endpoint || '' }}
-          direct_traces_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_traces_endpoint || '' }}
-          direct_metrics_endpoint: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_metrics_endpoint || '' }}
+          collector_endpoint: ${{ inputs.collector_endpoint || '' }}
+          collector_traces_endpoint: ${{ inputs.collector_traces_endpoint || '' }}
+          collector_metrics_endpoint: ${{ inputs.collector_metrics_endpoint || '' }}
+          direct_endpoint: ${{ inputs.direct_endpoint || '' }}
+          direct_traces_endpoint: ${{ inputs.direct_traces_endpoint || '' }}
+          direct_metrics_endpoint: ${{ inputs.direct_metrics_endpoint || '' }}
           deploy_managed_suite: false
           reuse_managed_suite: true
           aws_region: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
@@ -173,15 +169,15 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
       AWS_DEFAULT_REGION: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
       STACK_NAME: ${{ vars.STACK_NAME != '' && vars.STACK_NAME || 'order-satellite-service' }}
-      RESOURCE_PREFIX: ${{ github.event_name == 'workflow_dispatch' && (inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-mn') || (vars.RESOURCE_PREFIX || 'aws-dev-mn') }}
-      VPC_ID: ${{ github.event_name == 'workflow_dispatch' && inputs.vpc_id || 'vpc-095bf825560175dae' }}
-      LOG_RETENTION_IN_DAYS: ${{ github.event_name == 'workflow_dispatch' && inputs.log_retention_in_days || vars.LOG_RETENTION_IN_DAYS || '1' }}
-      EXPORT_STRATEGY: ${{ github.event_name == 'workflow_dispatch' && inputs.export_strategy || vars.EXPORT_STRATEGY || 'collector' }}
-      COLLECTOR_TRACES_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_traces_endpoint || '' }}
-      COLLECTOR_METRICS_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.collector_metrics_endpoint || '' }}
-      DIRECT_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_endpoint || '' }}
-      DIRECT_TRACES_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_traces_endpoint || '' }}
-      DIRECT_METRICS_ENDPOINT: ${{ github.event_name == 'workflow_dispatch' && inputs.direct_metrics_endpoint || '' }}
+      RESOURCE_PREFIX: ${{ inputs.resource_prefix || vars.RESOURCE_PREFIX || 'aws-dev-mn' }}
+      VPC_ID: ${{ inputs.vpc_id }}
+      LOG_RETENTION_IN_DAYS: ${{ inputs.log_retention_in_days || vars.LOG_RETENTION_IN_DAYS || '1' }}
+      EXPORT_STRATEGY: ${{ inputs.export_strategy || vars.EXPORT_STRATEGY || 'collector' }}
+      COLLECTOR_TRACES_ENDPOINT: ${{ inputs.collector_traces_endpoint || '' }}
+      COLLECTOR_METRICS_ENDPOINT: ${{ inputs.collector_metrics_endpoint || '' }}
+      DIRECT_ENDPOINT: ${{ inputs.direct_endpoint || '' }}
+      DIRECT_TRACES_ENDPOINT: ${{ inputs.direct_traces_endpoint || '' }}
+      DIRECT_METRICS_ENDPOINT: ${{ inputs.direct_metrics_endpoint || '' }}
       ORDER_API_BASE_URL: ${{ vars.ORDER_API_BASE_URL || 'https://z410yhtm4c.execute-api.us-east-1.amazonaws.com' }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
@@ -203,6 +199,20 @@ jobs:
         uses: hashicorp/setup-terraform@v4
         with:
           terraform_wrapper: false
+
+      - name: Validate VPC ID input
+        run: |
+          set -euo pipefail
+
+          if [ -z "$VPC_ID" ]; then
+            echo "VPC_ID is required. Provide workflow_dispatch input 'vpc_id'." >&2
+            exit 1
+          fi
+
+          if [[ ! "$VPC_ID" =~ ^vpc-[0-9a-f]+$ ]]; then
+            echo "VPC_ID must look like an AWS VPC ID, for example vpc-0123456789abcdef0." >&2
+            exit 1
+          fi
 
       - name: Resolve Terraform state backend
         run: |

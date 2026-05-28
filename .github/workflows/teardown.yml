@@ -10,9 +10,9 @@ on:
         default: aws-dev-mn
         type: string
       vpc_id:
-        description: VPC ID where the service was deployed (used as fallback if state is missing)
+        description: Optional VPC ID where the service was deployed (used as fallback if state is missing)
         required: false
-        default: vpc-095bf825560175dae
+        default: ""
         type: string
       confirm_stack:
         description: Type the exact effective stack name to confirm teardown, including resource prefix when used
@@ -163,8 +163,13 @@ jobs:
           fi
 
           if [ -z "$VPC_ID" ]; then
-            VPC_ID="${{ inputs.vpc_id || 'vpc-095bf825560175dae' }}"
-            echo "WARNING: Could not read VPC_ID from state, using default: $VPC_ID" >&2
+            VPC_ID="${{ inputs.vpc_id || vars.VPC_ID || '' }}"
+            echo "WARNING: Could not read VPC_ID from state, using workflow input or vars.VPC_ID." >&2
+          fi
+
+          if [ -z "$VPC_ID" ]; then
+            echo "VPC_ID is required when it cannot be read from Terraform state. Provide input 'vpc_id' or configure repository/environment variable 'VPC_ID'." >&2
+            exit 1
           fi
 
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"

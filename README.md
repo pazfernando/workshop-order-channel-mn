@@ -39,14 +39,15 @@ ORDER_API_BASE_URL=https://otro-host.example.com gradle run
 El repositorio define tres workflows de GitHub Actions:
 
 - `CI`: compila y prueba la aplicacion, construye la imagen Docker y valida Terraform.
-- `Deploy`: consume `contracts/observability/observability-contract.yaml` con el IDP de observabilidad, publica la imagen en ECR y despliega la app en ECS/Fargate detras de un Application Load Balancer.
+- `Deploy`: se ejecuta manualmente, consume `contracts/observability/observability-contract.yaml` con el IDP de observabilidad, publica la imagen en ECR y despliega la app en ECS/Fargate detras de un Application Load Balancer.
 - `Teardown`: destruye el stack ECS/Fargate asociado al prefijo indicado.
 
-El despliegue siempre usa un prefijo. En ejecucion manual el input `resource_prefix` tiene default `aws-dev-1`; en pushes a `main` se usa `vars.RESOURCE_PREFIX` o `aws-dev-1`.
+El despliegue es manual-only y siempre usa un prefijo. El input `resource_prefix` tiene default `aws-dev-mn`.
 
 Inputs principales de `Deploy`:
 
 - `resource_prefix`: prefijo de recursos y estado Terraform.
+- `vpc_id`: VPC destino obligatoria para ejecuciones manuales.
 - `log_retention_in_days`: retencion de logs de CloudWatch.
 - `export_strategy`: `collector` o `direct`; el workflow genera un contrato efectivo antes de llamar al IDP.
 - `collector_endpoint`, `collector_traces_endpoint`, `collector_metrics_endpoint`: overrides OTLP opcionales para collector mode.
@@ -62,7 +63,7 @@ Variables opcionales:
 
 - `AWS_REGION` default `us-east-1`
 - `STACK_NAME` default `order-satellite-service`
-- `RESOURCE_PREFIX` default `aws-dev-1`
+- `RESOURCE_PREFIX` default `aws-dev-mn`
 - `TF_STATE_BUCKET` y `TF_STATE_KEY` para usar un backend remoto existente
 - `ORDER_API_BASE_URL`
 

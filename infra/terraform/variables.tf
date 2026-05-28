@@ -122,9 +122,14 @@ variable "direct_metrics_endpoint" {
 }
 
 variable "vpc_id" {
-  description = "VPC ID where the service will be deployed. Defaults to the account default VPC."
+  description = "VPC ID where the service will be deployed."
   type        = string
-  default     = "vpc-095bf825560175dae"
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^vpc-[0-9a-f]+$", var.vpc_id))
+    error_message = "vpc_id is required and must look like an AWS VPC ID, for example vpc-0123456789abcdef0."
+  }
 }
 
 variable "app_version" {

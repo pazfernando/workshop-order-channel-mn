@@ -15,6 +15,7 @@ import java.time.Instant;
 public class ExternalApiExceptionHandler implements ExceptionHandler<HttpClientResponseException, HttpResponse<ApiError>> {
 
     @Override
+    @SuppressWarnings("rawtypes")
     public HttpResponse<ApiError> handle(HttpRequest request, HttpClientResponseException exception) {
         String remoteBody = exception.getResponse()
             .getBody(String.class)
