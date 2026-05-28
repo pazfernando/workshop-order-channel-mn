@@ -1,9 +1,34 @@
 .gradle/
-.terraform/
 build/
+bin/
 out/
+
+# IDEs
 .idea/
 *.iml
+*.ipr
+*.iws
+*.class
+
+# Terraform
+.terraform/
+.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
+*.tfvars
+*.tfvars.json
+
+# Logs
+*.log
+logs/
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Misc
+*.swp
+*.swo
+*~
+.env
+.env.local
