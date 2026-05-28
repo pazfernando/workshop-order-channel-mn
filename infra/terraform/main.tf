@@ -18,6 +18,12 @@ locals {
   deployment_environment = "dev"
   log_group_name         = "/ecs/${local.infra_name}"
   public_azs             = slice(data.aws_availability_zones.available.names, 0, 2)
+  public_subnet_ids_by_az = {
+    for subnet in data.aws_subnet.public : subnet.availability_zone => subnet.id...
+  }
+  public_subnet_ids = [
+    for az in sort(keys(local.public_subnet_ids_by_az)) : sort(local.public_subnet_ids_by_az[az])[0]
+  ]
 
   otlp_base_endpoint    = var.export_strategy == "collector" ? trimspace(var.collector_endpoint) : ""
   otlp_traces_endpoint  = var.export_strategy == "collector" ? trimspace(var.collector_traces_endpoint) : ""
@@ -132,6 +138,12 @@ data "aws_subnets" "public" {
     name   = "availability-zone"
     values = local.public_azs
   }
+}
+
+data "aws_subnet" "public" {
+  for_each = toset(data.aws_subnets.public.ids)
+
+  id = each.value
 }
 
 resource "aws_ecr_repository" "app" {
@@ -254,8 +266,15 @@ resource "aws_lb" "app" {
   name                       = local.infra_name
   load_balancer_type         = "application"
   security_groups            = [aws_security_group.load_balancer.id]
-  subnets                    = data.aws_subnets.public.ids
+  subnets                    = local.public_subnet_ids
   enable_deletion_protection = false
+
+  lifecycle {
+    precondition {
+      condition     = length(local.public_subnet_ids) >= 2
+      error_message = "At least two subnets in distinct Availability Zones are required to create the application load balancer."
+    }
+  }
 
   tags = local.common_tags
 }
@@ -362,7 +381,7 @@ resource "aws_ecs_service" "app" {
   network_configuration {
     assign_public_ip = true
     security_groups  = [aws_security_group.service.id]
-    subnets          = data.aws_subnets.public.ids
+    subnets          = local.public_subnet_ids
   }
 
   depends_on = [

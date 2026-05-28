@@ -258,32 +258,26 @@ jobs:
             -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="region=${AWS_REGION}"
 
-      - name: Ensure ECR repository exists
+      - name: Bootstrap ECR repository
         run: |
           set -euo pipefail
 
-          EFFECTIVE_STACK_NAME="$STACK_NAME"
-          if [ -n "$RESOURCE_PREFIX" ]; then
-            EFFECTIVE_STACK_NAME="${RESOURCE_PREFIX}-${STACK_NAME}"
-          fi
+          terraform -chdir=infra/terraform apply \
+            -auto-approve \
+            -target=aws_ecr_repository.app \
+            -var="aws_region=${AWS_REGION}" \
+            -var="stack_name=${STACK_NAME}" \
+            -var="resource_prefix=${RESOURCE_PREFIX}" \
+            -var="image_uri=${IMAGE_URI_PLACEHOLDER}" \
+            -var="order_api_base_url=${ORDER_API_BASE_URL}" \
+            -var="log_retention_in_days=${LOG_RETENTION_IN_DAYS}" \
+            -var="vpc_id=${VPC_ID}" \
+            -var="instrumentation_mode=javaagent" \
+            -var="export_strategy=${EXPORT_STRATEGY}" \
+            -var="collector_traces_endpoint=${COLLECTOR_TRACES_ENDPOINT}" \
+            -var="collector_metrics_endpoint=${COLLECTOR_METRICS_ENDPOINT}"
 
-          ECR_REPOSITORY_NAME="$(printf '%s' "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
-          ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME#-}"
-          ECR_REPOSITORY_NAME="${ECR_REPOSITORY_NAME%-}/app"
-
-          # Create ECR repository if it doesn't exist (via AWS CLI, not Terraform yet)
-          if ! aws ecr describe-repositories --repository-names "$ECR_REPOSITORY_NAME" >/dev/null 2>&1; then
-            echo "Creating ECR repository: $ECR_REPOSITORY_NAME"
-            aws ecr create-repository \
-              --repository-name "$ECR_REPOSITORY_NAME" \
-              --image-scanning-configuration scanOnPush=true
-          fi
-
-          # Derive repository URL
-          ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
-          ECR_REPOSITORY_URL="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY_NAME}"
-
-          echo "ECR_REPOSITORY_NAME=$ECR_REPOSITORY_NAME" >> "$GITHUB_ENV"
+          ECR_REPOSITORY_URL="$(terraform -chdir=infra/terraform output -raw ecr_repository_url)"
           echo "ECR_REPOSITORY_URL=$ECR_REPOSITORY_URL" >> "$GITHUB_ENV"
           echo "ECR_REPOSITORY_URL=$ECR_REPOSITORY_URL"
 
