@@ -13,6 +13,10 @@ on:
         description: VPC ID where the service will be deployed
         required: true
         type: string
+      order_api_base_url:
+        description: Base URL for the external Order API
+        required: true
+        type: string
       log_retention_in_days:
         description: CloudWatch log retention in days
         required: false
@@ -178,7 +182,7 @@ jobs:
       DIRECT_ENDPOINT: ${{ inputs.direct_endpoint || '' }}
       DIRECT_TRACES_ENDPOINT: ${{ inputs.direct_traces_endpoint || '' }}
       DIRECT_METRICS_ENDPOINT: ${{ inputs.direct_metrics_endpoint || '' }}
-      ORDER_API_BASE_URL: ${{ vars.ORDER_API_BASE_URL || 'https://z410yhtm4c.execute-api.us-east-1.amazonaws.com' }}
+      ORDER_API_BASE_URL: ${{ inputs.order_api_base_url }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
       IMAGE_URI_PLACEHOLDER: public.ecr.aws/docker/library/eclipse-temurin:21-jre

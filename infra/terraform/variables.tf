@@ -30,7 +30,6 @@ variable "image_uri" {
 variable "order_api_base_url" {
   description = "External order API base URL consumed by the Micronaut service."
   type        = string
-  default     = "https://z410yhtm4c.execute-api.us-east-1.amazonaws.com"
 }
 
 variable "desired_count" {
