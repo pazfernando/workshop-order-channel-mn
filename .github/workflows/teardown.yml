@@ -120,6 +120,28 @@ jobs:
             -backend-config="key=${TF_STATE_KEY}" \
             -backend-config="region=${AWS_REGION}"
 
+      - name: Delete ECR repository
+        run: |
+          set -euo pipefail
+
+          EFFECTIVE_STACK_NAME="$STACK_NAME"
+          if [ -n "$RESOURCE_PREFIX" ]; then
+            EFFECTIVE_STACK_NAME="${RESOURCE_PREFIX}-${STACK_NAME}"
+          fi
+
+          ECR_NAME="$(printf '%s' "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          ECR_NAME="${ECR_NAME#-}"
+          ECR_NAME="${ECR_NAME%-}/app"
+
+          if aws ecr describe-repositories --repository-names "$ECR_NAME" >/dev/null 2>&1; then
+            echo "Deleting ECR repository $ECR_NAME..."
+            aws ecr delete-repository --repository-name "$ECR_NAME" --force
+          else
+            echo "ECR repository $ECR_NAME does not exist."
+          fi
+
+          terraform -chdir=infra/terraform state rm aws_ecr_repository.app >/dev/null 2>&1 || true
+
       - name: Read variables from Terraform state
         run: |
           set -euo pipefail
@@ -213,16 +235,19 @@ jobs:
           fi
 
           if [ -z "$VPC_ID" ]; then
-            echo "VPC_ID is required when it cannot be read from Terraform state or discovered from AWS resources. Provide input 'vpc_id' or configure vars.VPC_ID." >&2
-            exit 1
+            echo "No VPC-backed resources were found. ECR cleanup is complete; skipping Terraform destroy."
+            echo "SKIP_TERRAFORM_DESTROY=true" >> "$GITHUB_ENV"
+            exit 0
           fi
 
           echo "IMAGE_URI=$IMAGE_URI" >> "$GITHUB_ENV"
           echo "VPC_ID=$VPC_ID" >> "$GITHUB_ENV"
+          echo "SKIP_TERRAFORM_DESTROY=false" >> "$GITHUB_ENV"
           echo "Resolved IMAGE_URI=$IMAGE_URI"
           echo "Resolved VPC_ID=$VPC_ID"
 
       - name: Import existing resources for teardown
+        if: env.SKIP_TERRAFORM_DESTROY != 'true'
         run: |
           set -euo pipefail
           cd infra/terraform
@@ -277,9 +302,6 @@ jobs:
             -var="export_strategy=collector"
           )
 
-          ECR_ID="$(aws ecr describe-repositories --repository-names "$ECR_NAME" --query 'repositories[0].repositoryName' --output text 2>/dev/null || true)"
-          import_if_exists "aws_ecr_repository.app" "$ECR_ID"
-
           LOG_GROUP_ID="$(aws logs describe-log-groups --log-group-name-prefix "$LOG_GROUP" --query "logGroups[?logGroupName=='${LOG_GROUP}'].logGroupName | [0]" --output text 2>/dev/null || true)"
           import_if_exists "aws_cloudwatch_log_group.app" "$LOG_GROUP_ID"
 
@@ -324,36 +346,8 @@ jobs:
 
           echo "Import for teardown completed"
 
-      - name: Empty ECR repository
-        run: |
-          set -euo pipefail
-
-          EFFECTIVE_STACK_NAME="$STACK_NAME"
-          if [ -n "$RESOURCE_PREFIX" ]; then
-            EFFECTIVE_STACK_NAME="${RESOURCE_PREFIX}-${STACK_NAME}"
-          fi
-
-          ECR_NAME="$(printf '%s' "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
-          ECR_NAME="${ECR_NAME#-}"
-          ECR_NAME="${ECR_NAME%-}/app"
-
-          if ! aws ecr describe-repositories --repository-names "$ECR_NAME" >/dev/null 2>&1; then
-            echo "ECR repository $ECR_NAME does not exist."
-            exit 0
-          fi
-
-          IMAGE_IDS="$(aws ecr list-images --repository-name "$ECR_NAME" --query 'imageIds' --output json)"
-          if [ "$IMAGE_IDS" = "[]" ]; then
-            echo "ECR repository $ECR_NAME is already empty."
-            exit 0
-          fi
-
-          echo "Deleting images from ECR repository $ECR_NAME..."
-          aws ecr batch-delete-image \
-            --repository-name "$ECR_NAME" \
-            --image-ids "$IMAGE_IDS" >/dev/null
-
       - name: Destroy ECS/Fargate stack
+        if: env.SKIP_TERRAFORM_DESTROY != 'true'
         run: |
           terraform -chdir=infra/terraform destroy \
             -auto-approve \
