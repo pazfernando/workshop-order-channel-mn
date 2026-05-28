@@ -324,6 +324,35 @@ jobs:
 
           echo "Import for teardown completed"
 
+      - name: Empty ECR repository
+        run: |
+          set -euo pipefail
+
+          EFFECTIVE_STACK_NAME="$STACK_NAME"
+          if [ -n "$RESOURCE_PREFIX" ]; then
+            EFFECTIVE_STACK_NAME="${RESOURCE_PREFIX}-${STACK_NAME}"
+          fi
+
+          ECR_NAME="$(printf '%s' "$EFFECTIVE_STACK_NAME" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          ECR_NAME="${ECR_NAME#-}"
+          ECR_NAME="${ECR_NAME%-}/app"
+
+          if ! aws ecr describe-repositories --repository-names "$ECR_NAME" >/dev/null 2>&1; then
+            echo "ECR repository $ECR_NAME does not exist."
+            exit 0
+          fi
+
+          IMAGE_IDS="$(aws ecr list-images --repository-name "$ECR_NAME" --query 'imageIds' --output json)"
+          if [ "$IMAGE_IDS" = "[]" ]; then
+            echo "ECR repository $ECR_NAME is already empty."
+            exit 0
+          fi
+
+          echo "Deleting images from ECR repository $ECR_NAME..."
+          aws ecr batch-delete-image \
+            --repository-name "$ECR_NAME" \
+            --image-ids "$IMAGE_IDS" >/dev/null
+
       - name: Destroy ECS/Fargate stack
         run: |
           terraform -chdir=infra/terraform destroy \
