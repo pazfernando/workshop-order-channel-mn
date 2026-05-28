@@ -45,21 +45,6 @@ on:
         required: false
         default: ""
         type: string
-      direct_endpoint:
-        description: Optional direct OTLP base endpoint
-        required: false
-        default: ""
-        type: string
-      direct_traces_endpoint:
-        description: Optional direct traces endpoint override
-        required: false
-        default: ""
-        type: string
-      direct_metrics_endpoint:
-        description: Optional direct metrics endpoint override
-        required: false
-        default: ""
-        type: string
 jobs:
   observability:
     runs-on: ubuntu-latest
@@ -124,19 +109,11 @@ jobs:
           COLLECTOR_ENDPOINT_INPUT: ${{ inputs.collector_endpoint || '' }}
           COLLECTOR_TRACES_ENDPOINT_INPUT: ${{ inputs.collector_traces_endpoint || '' }}
           COLLECTOR_METRICS_ENDPOINT_INPUT: ${{ inputs.collector_metrics_endpoint || '' }}
-          DIRECT_ENDPOINT_INPUT: ${{ inputs.direct_endpoint || '' }}
-          DIRECT_TRACES_ENDPOINT_INPUT: ${{ inputs.direct_traces_endpoint || '' }}
-          DIRECT_METRICS_ENDPOINT_INPUT: ${{ inputs.direct_metrics_endpoint || '' }}
         run: |
           set -euo pipefail
 
           if [ "$EXPORT_STRATEGY_INPUT" = "direct" ] && { [ -n "$COLLECTOR_ENDPOINT_INPUT" ] || [ -n "$COLLECTOR_TRACES_ENDPOINT_INPUT" ] || [ -n "$COLLECTOR_METRICS_ENDPOINT_INPUT" ]; }; then
             echo "collector_* inputs cannot be combined with export_strategy=direct." >&2
-            exit 1
-          fi
-
-          if [ "$EXPORT_STRATEGY_INPUT" = "collector" ] && { [ -n "$DIRECT_ENDPOINT_INPUT" ] || [ -n "$DIRECT_TRACES_ENDPOINT_INPUT" ] || [ -n "$DIRECT_METRICS_ENDPOINT_INPUT" ]; }; then
-            echo "direct_* inputs cannot be combined with export_strategy=collector." >&2
             exit 1
           fi
 
@@ -150,9 +127,6 @@ jobs:
           collector_endpoint: ${{ inputs.collector_endpoint || '' }}
           collector_traces_endpoint: ${{ inputs.collector_traces_endpoint || '' }}
           collector_metrics_endpoint: ${{ inputs.collector_metrics_endpoint || '' }}
-          direct_endpoint: ${{ inputs.direct_endpoint || '' }}
-          direct_traces_endpoint: ${{ inputs.direct_traces_endpoint || '' }}
-          direct_metrics_endpoint: ${{ inputs.direct_metrics_endpoint || '' }}
           deploy_managed_suite: false
           reuse_managed_suite: true
           aws_region: ${{ vars.AWS_REGION != '' && vars.AWS_REGION || 'us-east-1' }}
@@ -179,9 +153,6 @@ jobs:
       EXPORT_STRATEGY: ${{ inputs.export_strategy || vars.EXPORT_STRATEGY || 'collector' }}
       COLLECTOR_TRACES_ENDPOINT: ${{ inputs.collector_traces_endpoint || '' }}
       COLLECTOR_METRICS_ENDPOINT: ${{ inputs.collector_metrics_endpoint || '' }}
-      DIRECT_ENDPOINT: ${{ inputs.direct_endpoint || '' }}
-      DIRECT_TRACES_ENDPOINT: ${{ inputs.direct_traces_endpoint || '' }}
-      DIRECT_METRICS_ENDPOINT: ${{ inputs.direct_metrics_endpoint || '' }}
       ORDER_API_BASE_URL: ${{ inputs.order_api_base_url }}
       TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
       TF_STATE_KEY: ${{ vars.TF_STATE_KEY }}
@@ -344,10 +315,7 @@ jobs:
             -var="export_strategy=${EXPORT_STRATEGY}" \
             -var="collector_endpoint=${EFFECTIVE_COLLECTOR_ENDPOINT}" \
             -var="collector_traces_endpoint=${COLLECTOR_TRACES_ENDPOINT}" \
-            -var="collector_metrics_endpoint=${COLLECTOR_METRICS_ENDPOINT}" \
-            -var="direct_endpoint=${DIRECT_ENDPOINT}" \
-            -var="direct_traces_endpoint=${DIRECT_TRACES_ENDPOINT}" \
-            -var="direct_metrics_endpoint=${DIRECT_METRICS_ENDPOINT}"
+            -var="collector_metrics_endpoint=${COLLECTOR_METRICS_ENDPOINT}"
 
       - name: Publish deployment summary
         run: |

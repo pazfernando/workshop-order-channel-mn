@@ -49,9 +49,8 @@ Inputs principales de `Deploy`:
 - `resource_prefix`: prefijo de recursos y estado Terraform.
 - `vpc_id`: VPC destino obligatoria para ejecuciones manuales.
 - `log_retention_in_days`: retencion de logs de CloudWatch.
-- `export_strategy`: `collector` o `direct`; el workflow genera un contrato efectivo antes de llamar al IDP.
-- `collector_endpoint`, `collector_traces_endpoint`, `collector_metrics_endpoint`: overrides OTLP opcionales para collector mode.
-- `direct_endpoint`, `direct_traces_endpoint`, `direct_metrics_endpoint`: endpoints OTLP opcionales para direct mode en ECS/Fargate.
+- `export_strategy`: `collector` o `direct`; el workflow genera un contrato efectivo antes de llamar al IDP. `collector` reutiliza la management suite del IDP cuando no se proveen overrides, mientras que `direct` despliega solo contra AWS sin suite administrada ni endpoints OTLP externos.
+- `collector_endpoint`, `collector_traces_endpoint`, `collector_metrics_endpoint`: overrides OTLP opcionales para collector mode. Si se provee `collector_endpoint`, este endpoint explicito toma precedencia sobre la management suite.
 
 Secrets requeridos en GitHub Actions, configurados en el environment `aws-dev` o a nivel de repositorio:
 
@@ -67,7 +66,7 @@ Variables opcionales:
 - `TF_STATE_BUCKET` y `TF_STATE_KEY` para usar un backend remoto existente
 - `ORDER_API_BASE_URL`
 
-El workflow de observabilidad usa `pazfernando/workshop-idp-o11y/.github/actions/contract-consumer@main` sobre el contrato efectivo. Para ECS/Fargate no se generan bindings Lambda; se usa el IDP para validacion, plan y resolucion del endpoint del collector administrado cuando `export_strategy=collector`.
+El workflow de observabilidad usa `pazfernando/workshop-idp-o11y/.github/actions/contract-consumer@main` sobre el contrato efectivo. Para ECS/Fargate no se generan bindings Lambda; se usa el IDP para validacion, plan y resolucion del endpoint del collector administrado cuando `export_strategy=collector`. Cuando `export_strategy=direct`, el workflow no intenta resolver la management suite y Terraform no configura endpoints OTLP de collector.
 
 La instrumentacion de este workload no es configurable desde el workflow: la imagen incluye el OpenTelemetry Java agent y Terraform lo habilita siempre con `javaagent`.
 

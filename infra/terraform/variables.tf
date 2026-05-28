@@ -102,24 +102,6 @@ variable "collector_metrics_endpoint" {
   default     = ""
 }
 
-variable "direct_endpoint" {
-  description = "Optional direct OTLP base endpoint for direct export mode."
-  type        = string
-  default     = ""
-}
-
-variable "direct_traces_endpoint" {
-  description = "Optional direct traces endpoint override."
-  type        = string
-  default     = ""
-}
-
-variable "direct_metrics_endpoint" {
-  description = "Optional direct metrics endpoint override."
-  type        = string
-  default     = ""
-}
-
 variable "vpc_id" {
   description = "VPC ID where the service will be deployed."
   type        = string

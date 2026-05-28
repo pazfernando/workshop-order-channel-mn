@@ -43,11 +43,11 @@ spec:
       traces:
         enabled: true
         backendClass: aws-xray
-        ingestion: direct
+        ingestion: collector
       metrics:
         enabled: true
         backendClass: aws-cloudwatch
-        ingestion: direct
+        ingestion: collector
         catalog:
           - name: http.server.request.duration
             type: histogram
@@ -62,7 +62,7 @@ spec:
       logs:
         enabled: true
         backendClass: cloudwatch-logs
-        ingestion: direct
+        ingestion: collector
 
   capabilities:
     dashboards:

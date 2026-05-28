@@ -19,15 +19,11 @@ locals {
   log_group_name         = "/ecs/${local.infra_name}"
   public_azs             = slice(data.aws_availability_zones.available.names, 0, 2)
 
-  otlp_base_endpoint = var.export_strategy == "collector" ? trimspace(var.collector_endpoint) : trimspace(var.direct_endpoint)
-  otlp_traces_endpoint = var.export_strategy == "collector" ? (
-    trimspace(var.collector_traces_endpoint)
-  ) : trimspace(var.direct_traces_endpoint)
-  otlp_metrics_endpoint = var.export_strategy == "collector" ? (
-    trimspace(var.collector_metrics_endpoint)
-  ) : trimspace(var.direct_metrics_endpoint)
-  has_otlp_endpoint = local.otlp_base_endpoint != "" || local.otlp_traces_endpoint != "" || local.otlp_metrics_endpoint != ""
-  otlp_enabled      = var.instrumentation_mode == "javaagent" && local.has_otlp_endpoint
+  otlp_base_endpoint    = var.export_strategy == "collector" ? trimspace(var.collector_endpoint) : ""
+  otlp_traces_endpoint  = var.export_strategy == "collector" ? trimspace(var.collector_traces_endpoint) : ""
+  otlp_metrics_endpoint = var.export_strategy == "collector" ? trimspace(var.collector_metrics_endpoint) : ""
+  has_otlp_endpoint     = local.otlp_base_endpoint != "" || local.otlp_traces_endpoint != "" || local.otlp_metrics_endpoint != ""
+  otlp_enabled          = var.instrumentation_mode == "javaagent" && local.has_otlp_endpoint
 
   base_environment = [
     {
