@@ -34,8 +34,8 @@ public class OrderApiController {
     public Mono<OrderResponse> crearOrden(@Valid @Body OrderRequest request) {
         Timer.Sample sample = Timer.start(meterRegistry);
         return orderApiClient.crearOrden(request)
-            .doOnSuccess(response -> registrarCreacion("success", request.productoId()))
-            .doOnError(exception -> registrarCreacion("error", request.productoId()))
+            .doOnSuccess(response -> registrarCreacion("success", productId(request)))
+            .doOnError(exception -> registrarCreacion("error", productId(request)))
             .doFinally(signalType -> sample.stop(Timer.builder("orders.processing.duration")
                 .description("Duracion del procesamiento de ordenes")
                 .tag("operation", "create")
@@ -59,5 +59,9 @@ public class OrderApiController {
             .tag("productId", productId)
             .register(meterRegistry)
             .increment();
+    }
+
+    private String productId(OrderRequest request) {
+        return request.items().isEmpty() ? "unknown" : request.items().get(0).sku();
     }
 }

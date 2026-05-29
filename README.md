@@ -5,6 +5,7 @@ Aplicacion demo Micronaut que expone una interfaz HTML sin autenticacion para cr
 ## Componentes
 
 - Vista Thymeleaf en `/` con formulario de creacion, busqueda por ID y salida JSON formateada.
+  El formulario de creacion envia `customerId`, `currency` e `items[]` con `sku`, `quantity` y `unitPrice`, que es el contrato requerido por la API externa.
 - API local en `/api/orders` que delega al cliente HTTP declarativo.
 - Cliente Micronaut `@Client` apuntando a `https://z410yhtm4c.execute-api.us-east-1.amazonaws.com`.
 - Contrato IDP de observabilidad en `contracts/observability/observability-contract.yaml`.

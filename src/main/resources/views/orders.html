@@ -19,11 +19,20 @@
     <section class="grid">
         <form class="panel" id="create-order-form">
             <h2>Crear orden</h2>
-            <label for="productoId">Producto ID</label>
-            <input id="productoId" name="productoId" type="text" placeholder="SKU-001" required>
+            <label for="customerId">Customer ID</label>
+            <input id="customerId" name="customerId" type="text" placeholder="customer-001" required>
 
-            <label for="cantidad">Cantidad</label>
-            <input id="cantidad" name="cantidad" type="number" min="1" value="1" required>
+            <label for="sku">SKU</label>
+            <input id="sku" name="sku" type="text" placeholder="SKU-001" required>
+
+            <label for="quantity">Cantidad</label>
+            <input id="quantity" name="quantity" type="number" min="1" value="1" required>
+
+            <label for="unitPrice">Precio unitario</label>
+            <input id="unitPrice" name="unitPrice" type="number" min="0.01" step="0.01" value="25.50" required>
+
+            <label for="currency">Moneda</label>
+            <input id="currency" name="currency" type="text" value="USD" maxlength="3" required>
 
             <button type="submit">Crear Orden</button>
         </form>
@@ -81,8 +90,15 @@
         await callApi("/api/orders", {
             method: "POST",
             body: JSON.stringify({
-                productoId: form.get("productoId"),
-                cantidad: Number(form.get("cantidad"))
+                customerId: form.get("customerId"),
+                items: [
+                    {
+                        sku: form.get("sku"),
+                        quantity: Number(form.get("quantity")),
+                        unitPrice: Number(form.get("unitPrice"))
+                    }
+                ],
+                currency: form.get("currency")
             })
         });
     });
